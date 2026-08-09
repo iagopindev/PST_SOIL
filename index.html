@@ -1,0 +1,1256 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0f7b6c" />
+<title>Relatório de Visitas Técnicas · Nescafé × SOIL</title>
+
+<!-- ===================== LIBS (CDN) ===================== -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<style>
+/* ===================== DESIGN TOKENS (clean, claro, alto contraste) ===================== */
+:root{
+  --brand:#0f7b6c; --brand-dark:#0b5c51; --brand-soft:#e6f4f1;
+  --bg:#f6f8f7; --card:#ffffff; --line:#dfe7e4;
+  --ink:#12261f; --muted:#5b6b64; --danger:#c0392b; --warn:#d9822b; --ok:#1e874b;
+  --accent-n:#2d6cdf; --accent-p:#8e44ad; --accent-k:#e08e0b;
+  --r:14px; --sh:0 2px 10px rgba(16,40,33,.06); --sh2:0 6px 24px rgba(16,40,33,.10);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  background:var(--bg); color:var(--ink); font-size:16px; -webkit-text-size-adjust:100%;}
+h1,h2,h3{margin:0 0 .4em}
+a{color:var(--brand-dark)}
+button{font:inherit; cursor:pointer}
+input,select,textarea{font:inherit; width:100%; padding:12px 14px; border:1px solid var(--line);
+  border-radius:10px; background:#fff; color:var(--ink)}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--brand); border-color:var(--brand)}
+label{display:block; font-weight:600; font-size:.9rem; margin:10px 0 4px; color:var(--ink)}
+.hint{color:var(--muted); font-size:.82rem; margin-top:4px}
+
+/* Layout */
+.app{max-width:820px; margin:0 auto; padding:0 14px 96px}
+.topbar{position:sticky; top:0; z-index:30; background:var(--brand);
+  color:#fff; padding:12px 14px; display:flex; align-items:center; gap:10px;
+  box-shadow:var(--sh); padding-top:calc(12px + env(safe-area-inset-top))}
+.topbar .logo{font-weight:800; letter-spacing:.3px; font-size:1.05rem; flex:1}
+.topbar .pill{background:rgba(255,255,255,.18); padding:4px 10px; border-radius:999px; font-size:.78rem}
+.topbar button{background:rgba(255,255,255,.15); color:#fff; border:0; padding:8px 12px; border-radius:10px}
+
+.card{background:var(--card); border:1px solid var(--line); border-radius:var(--r);
+  box-shadow:var(--sh); padding:16px; margin:14px 0}
+.card h2{font-size:1.1rem}
+.section-title{font-size:.78rem; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin:18px 2px 6px}
+
+.btn{background:var(--brand); color:#fff; border:0; padding:13px 16px; border-radius:11px;
+  font-weight:700; width:100%; box-shadow:var(--sh)}
+.btn:active{transform:translateY(1px)}
+.btn.secondary{background:#fff; color:var(--brand-dark); border:1.5px solid var(--brand)}
+.btn.ghost{background:transparent; color:var(--brand-dark); box-shadow:none; border:1px dashed var(--line)}
+.btn.danger{background:var(--danger)}
+.btn.small{width:auto; padding:9px 12px; font-size:.85rem; border-radius:9px}
+.row{display:flex; gap:10px; flex-wrap:wrap}
+.row > *{flex:1; min-width:0}
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+@media(max-width:560px){.grid2{grid-template-columns:1fr}}
+
+.badge{display:inline-block; padding:3px 9px; border-radius:999px; font-size:.74rem; font-weight:700}
+.badge.ok{background:#e2f3ea; color:var(--ok)} .badge.warn{background:#fbeede; color:var(--warn)}
+.badge.dang{background:#fbe4e0; color:var(--danger)} .badge.n{background:#e7effc;color:var(--accent-n)}
+.badge.p{background:#f1e7fa;color:var(--accent-p)} .badge.k{background:#fcf1dc;color:var(--accent-k)}
+
+.list{display:flex; flex-direction:column; gap:8px}
+.item{border:1px solid var(--line); border-radius:12px; padding:12px; background:#fff;
+  display:flex; align-items:center; gap:10px}
+.item .grow{flex:1; min-width:0}
+.item .title{font-weight:700}
+.item .sub{color:var(--muted); font-size:.85rem}
+
+.check{display:flex; align-items:flex-start; gap:10px; padding:10px 12px; border:1px solid var(--line);
+  border-radius:10px; background:#fff; margin:6px 0}
+.check input{width:20px; height:20px; flex:0 0 auto; margin-top:2px}
+.check .lbl{flex:1}
+
+.chips{display:flex; flex-wrap:wrap; gap:8px}
+.chip{padding:8px 12px; border-radius:999px; border:1.5px solid var(--line); background:#fff;
+  font-size:.85rem; font-weight:600}
+.chip.on{background:var(--brand-soft); border-color:var(--brand); color:var(--brand-dark)}
+
+.hidden{display:none !important}
+.center{text-align:center}
+.spacer{height:8px}
+.divider{height:1px; background:var(--line); margin:14px 0}
+
+/* KPIs */
+.kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px}
+.kpi{background:#fff; border:1px solid var(--line); border-radius:14px; padding:14px; box-shadow:var(--sh)}
+.kpi .v{font-size:1.6rem; font-weight:800; color:var(--brand-dark)}
+.kpi .l{color:var(--muted); font-size:.82rem; margin-top:2px}
+.kpi .d{font-size:.78rem; margin-top:4px}
+
+table{width:100%; border-collapse:collapse; font-size:.88rem}
+th,td{text-align:left; padding:9px 8px; border-bottom:1px solid var(--line)}
+th{color:var(--muted); font-weight:700; font-size:.78rem; text-transform:uppercase; letter-spacing:.4px}
+.tablewrap{overflow-x:auto}
+
+/* Toast */
+.toast{position:fixed; left:50%; bottom:22px; transform:translateX(-50%);
+  background:#12261f; color:#fff; padding:12px 18px; border-radius:12px; box-shadow:var(--sh2);
+  z-index:100; font-size:.9rem; max-width:90%; opacity:0; pointer-events:none; transition:.25s}
+.toast.show{opacity:1}
+.toast.err{background:var(--danger)} .toast.ok{background:var(--ok)}
+
+/* Offline banner */
+.offline{position:fixed; top:0; left:0; right:0; background:var(--warn); color:#fff;
+  text-align:center; padding:6px; font-size:.82rem; z-index:200}
+
+/* Loading */
+.loader{display:inline-block; width:18px; height:18px; border:3px solid rgba(255,255,255,.4);
+  border-top-color:#fff; border-radius:50%; animation:spin .8s linear infinite; vertical-align:-3px}
+.loader.dark{border-color:var(--line); border-top-color:var(--brand)}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Bottom nav (consultor) */
+.bottomnav{position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:1px solid var(--line);
+  display:flex; z-index:25; padding-bottom:env(safe-area-inset-bottom)}
+.bottomnav button{flex:1; background:none; border:0; padding:10px 4px; color:var(--muted); font-size:.72rem;
+  font-weight:600; display:flex; flex-direction:column; align-items:center; gap:3px}
+.bottomnav button.on{color:var(--brand-dark)}
+.bottomnav .ic{font-size:1.3rem; line-height:1}
+
+.subblock{border:1px solid var(--line); border-radius:12px; padding:12px; margin:10px 0; background:#fbfdfc}
+.nutri-line{display:grid; grid-template-columns:1fr 90px 34px; gap:8px; align-items:center; margin:6px 0}
+.npk-summary{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:8px}
+.npk-box{border:1px solid var(--line); border-radius:10px; padding:10px; text-align:center; background:#fff}
+.npk-box .v{font-weight:800; font-size:1.15rem}
+.photo{position:relative; border:1px solid var(--line); border-radius:10px; overflow:hidden}
+.photo img{width:100%; display:block; aspect-ratio:4/3; object-fit:cover}
+.photo .meta{font-size:.72rem; color:var(--muted); padding:6px 8px}
+.photogrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px}
+.fab{position:fixed; right:16px; bottom:80px; z-index:26; width:auto}
+
+.filters{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px}
+.chartbox{position:relative; height:240px}
+</style>
+</head>
+<body>
+<div id="offlineBanner" class="offline hidden">⚠ Sem conexão — trabalhando offline. Alterações serão sincronizadas quando a rede voltar.</div>
+<div id="toast" class="toast"></div>
+<div id="root"><div class="center" style="padding:60px"><span class="loader dark"></span> Carregando…</div></div>
+
+<!-- ============================================================= -->
+<!-- APLICAÇÃO                                                     -->
+<!-- ============================================================= -->
+<script>
+/* =====================================================================
+   CONFIGURAÇÃO — PREENCHA COM OS DADOS DO SEU PROJETO SUPABASE
+   (somente a anon/public key vai no front — NUNCA a service_role)
+   ===================================================================== */
+const SUPABASE_URL      = "https://htrdrbpdgmznvoqakjvv.supabase.co";        // ex.: https://xxxx.supabase.co
+const SUPABASE_ANON_KEY = "sb_publishable_7_mAbrK92qDBT0-j-2Bj_Q_ksDZOJbn";   // chave public/anon
+const ADMIN_EMAIL       = "adm@br.nestle.com";
+const ALERTA_DIAS       = 30;                         // fazenda não visitada (parametrizável)
+
+/* Observações fixas do item 5.4 */
+const OBS_CATEGORIAS = [
+  "Pragas e Doenças","Plantas Daninhas","Entupimento do Sistema de Irrigação",
+  "Necessidade de manejo/poda","Deficiência Nutricional","Alto consumo de água para irrigação",
+  "Água sem monitoramento de qualidade","Outros","Nenhum problema identificado"
+];
+const OBS_EXCLUSIVA = "Nenhum problema identificado";
+
+/* ===================== BOOT ===================== */
+const sb = (SUPABASE_URL.startsWith("http"))
+  ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {auth:{persistSession:true, autoRefreshToken:true}})
+  : null;
+
+const $ = (s,el=document)=>el.querySelector(s);
+const $$ = (s,el=document)=>[...el.querySelectorAll(s)];
+const root = $("#root");
+const state = { user:null, profile:null, catalogos:{fert:[],cpd:[],herb:[]},
+                fazenda:null, talhao:null, tab:"visita" };
+
+/* ---------- util ---------- */
+function toast(msg,type=""){const t=$("#toast"); t.className="toast show "+type; t.textContent=msg;
+  setTimeout(()=>t.className="toast",2600);}
+function fmtDate(d){ if(!d) return "—"; const x=new Date(d);
+  return x.toLocaleDateString("pt-BR")+" "+x.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});}
+function fmtDay(d){ if(!d) return "—"; return new Date(d).toLocaleDateString("pt-BR");}
+function norm(s){ return (s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+  .replace(/[^A-Za-z0-9]/g,"").replace(/\b\w/g,c=>c.toUpperCase()).replace(/[^A-Za-z0-9]/g,"");}
+function camel(s){ // token normalizado p/ nome de arquivo (sem acento/espaço/símbolo)
+  return (s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .split(/\s+/).map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join("").replace(/[^A-Za-z0-9]/g,"");}
+function num(v){ const n=parseFloat(String(v).replace(",",".")); return isFinite(n)?n:0; }
+async function guard(fn){ try{ return await fn(); }catch(e){ console.error(e);
+  toast(e.message||"Erro inesperado","err"); throw e; } }
+
+/* ---------- offline detection ---------- */
+function updateNet(){ $("#offlineBanner").classList.toggle("hidden", navigator.onLine); }
+window.addEventListener("online",updateNet); window.addEventListener("offline",updateNet); updateNet();
+
+
+/* =====================================================================
+   AUTENTICAÇÃO E ROTEAMENTO POR PERFIL
+   ===================================================================== */
+async function initAuth(){
+  if(!sb){ renderConfigMissing(); return; }
+  const { data:{ session } } = await sb.auth.getSession();
+  if(session){ await loadProfileAndRoute(); }
+  else { renderLogin(); }
+  sb.auth.onAuthStateChange((_e,s)=>{ if(!s) renderLogin(); });
+}
+
+function renderConfigMissing(){
+  root.innerHTML = `<div class="app"><div class="card">
+    <h2>⚙️ Configuração pendente</h2>
+    <p>Preencha <code>SUPABASE_URL</code> e <code>SUPABASE_ANON_KEY</code> no topo do arquivo
+    (ou via variáveis de ambiente no deploy) para conectar ao Supabase.</p>
+    <p class="hint">A chave <b>anon/public</b> é a única que vai no front-end. A
+    <b>service_role</b> nunca deve aparecer aqui.</p></div></div>`;
+}
+
+function renderLogin(){
+  state.user=null; state.profile=null;
+  root.innerHTML = `
+  <div class="app">
+    <div style="height:34px"></div>
+    <div class="center"><div style="font-size:2.2rem">🌱</div>
+      <h1 style="color:var(--brand-dark)">Relatório de Visitas Técnicas</h1>
+      <p class="hint">Parceria Nescafé × SOIL · Cafeicultura (arábica e conilon)</p></div>
+    <div class="card">
+      <div class="chips" style="margin-bottom:12px">
+        <button class="chip on" id="tabLogin">Entrar</button>
+        <button class="chip" id="tabSignup">Criar conta</button>
+      </div>
+      <div id="formLogin">
+        <label>E-mail</label><input id="li_email" type="email" autocomplete="email" placeholder="voce@empresa.com.br"/>
+        <label>Senha</label><input id="li_pass" type="password" autocomplete="current-password" placeholder="••••••••"/>
+        <div class="spacer"></div>
+        <button class="btn" id="btnLogin">Entrar</button>
+        <div class="spacer"></div>
+        <button class="btn ghost small" id="btnReset" style="width:100%">Esqueci minha senha</button>
+      </div>
+      <div id="formSignup" class="hidden">
+        <label>Nome completo</label><input id="su_nome" placeholder="Seu nome"/>
+        <label>E-mail</label><input id="su_email" type="email" placeholder="voce@empresa.com.br"/>
+        <label>Senha (mín. 6 caracteres)</label><input id="su_pass" type="password" placeholder="••••••••"/>
+        <div class="spacer"></div>
+        <button class="btn" id="btnSignup">Criar conta</button>
+        <p class="hint">Consultores já cadastrados na base são aprovados automaticamente.
+        Novos usuários ficam <b>pendentes</b> até a autorização do administrador.</p>
+      </div>
+    </div>
+  </div>`;
+  $("#tabLogin").onclick=()=>{$("#tabLogin").classList.add("on");$("#tabSignup").classList.remove("on");
+    $("#formLogin").classList.remove("hidden");$("#formSignup").classList.add("hidden");};
+  $("#tabSignup").onclick=()=>{$("#tabSignup").classList.add("on");$("#tabLogin").classList.remove("on");
+    $("#formSignup").classList.remove("hidden");$("#formLogin").classList.add("hidden");};
+  $("#btnLogin").onclick=doLogin; $("#btnSignup").onclick=doSignup; $("#btnReset").onclick=doReset;
+  $("#li_pass").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
+}
+
+async function doLogin(){
+  const email=$("#li_email").value.trim().toLowerCase(), pass=$("#li_pass").value;
+  if(!email||!pass) return toast("Informe e-mail e senha","err");
+  const b=$("#btnLogin"); b.innerHTML='<span class="loader"></span> Entrando…'; b.disabled=true;
+  const { error } = await sb.auth.signInWithPassword({email, password:pass});
+  b.disabled=false; b.textContent="Entrar";
+  if(error) return toast(error.message,"err");
+  await loadProfileAndRoute();
+}
+async function doSignup(){
+  const nome=$("#su_nome").value.trim(), email=$("#su_email").value.trim().toLowerCase(), pass=$("#su_pass").value;
+  if(!nome||!email||pass.length<6) return toast("Preencha nome, e-mail e senha (6+)","err");
+  const b=$("#btnSignup"); b.innerHTML='<span class="loader"></span> Criando…'; b.disabled=true;
+  const { error } = await sb.auth.signUp({email, password:pass, options:{data:{nome}}});
+  b.disabled=false; b.textContent="Criar conta";
+  if(error) return toast(error.message,"err");
+  toast("Conta criada! Verifique seu e-mail se a confirmação estiver ativa.","ok");
+}
+async function doReset(){
+  const email=$("#li_email").value.trim().toLowerCase();
+  if(!email) return toast("Digite seu e-mail no campo acima primeiro","err");
+  const { error } = await sb.auth.resetPasswordForEmail(email);
+  toast(error? error.message : "Enviamos um link de redefinição para seu e-mail.", error?"err":"ok");
+}
+
+async function loadProfileAndRoute(){
+  const { data:{ user } } = await sb.auth.getUser(); state.user=user;
+  let { data:prof } = await sb.from("consultores").select("*").eq("id",user.id).maybeSingle();
+  // fallback: aguarda trigger provisionar
+  if(!prof){ await new Promise(r=>setTimeout(r,800));
+    ({ data:prof } = await sb.from("consultores").select("*").eq("id",user.id).maybeSingle()); }
+  state.profile=prof;
+  if(!prof){ return renderPending("Seu perfil está sendo provisionado. Recarregue em instantes."); }
+  if(prof.status==="bloqueado") return renderPending("Seu acesso foi bloqueado pelo administrador.");
+  if(prof.status==="pendente")  return renderPending("Seu cadastro aguarda aprovação do administrador.");
+  await loadCatalogos();
+  if(prof.role==="admin") renderAdmin();
+  else renderConsultorHome();
+}
+
+function renderPending(msg){
+  root.innerHTML=`<div class="app"><div style="height:40px"></div>
+   <div class="card center"><div style="font-size:2rem">⏳</div>
+   <h2>Aguarde</h2><p>${msg}</p>
+   <button class="btn secondary" onclick="sb.auth.signOut()">Sair</button></div></div>`;
+}
+
+async function loadCatalogos(){
+  const [f,c,h] = await Promise.all([
+    sb.from("fert_cafe").select("*").order("nome"),
+    sb.from("cpd_cafe").select("*").order("molecula"),
+    sb.from("herb_cafe").select("*").order("molecula"),
+  ]);
+  state.catalogos.fert=f.data||[]; state.catalogos.cpd=c.data||[]; state.catalogos.herb=h.data||[];
+}
+
+function topbar(sub){
+  const p=state.profile;
+  return `<div class="topbar">
+    <span style="font-size:1.3rem">🌱</span>
+    <div class="logo">Visitas Técnicas <span class="pill">${sub||""}</span></div>
+    <span class="pill">${p?.nome||""}</span>
+    <button onclick="sb.auth.signOut()">Sair</button>
+  </div>`;
+}
+
+/* =====================================================================
+   FLUXO DO CONSULTOR
+   ===================================================================== */
+async function renderConsultorHome(){
+  state.tab="visita";
+  root.innerHTML = topbar("Consultor") + `<div class="app" id="cwrap"></div>` + bottomNav();
+  await viewFazendas();
+}
+function bottomNav(){
+  const t=state.tab;
+  return `<div class="bottomnav">
+    <button class="${t==='visita'?'on':''}" onclick="state.tab='visita';viewFazendas()"><span class="ic">🏡</span>Fazendas</button>
+    <button class="${t==='hist'?'on':''}" onclick="state.tab='hist';viewHistoricoPick()"><span class="ic">📚</span>Histórico</button>
+  </div>`;
+}
+
+/* ---------- lista/seleção de fazendas ---------- */
+async function viewFazendas(){
+  setTab('visita');
+  const w=$("#cwrap"); w.innerHTML=`<div class="center" style="padding:30px"><span class="loader dark"></span></div>`;
+  const { data:faz } = await sb.from("fazendas").select("*").order("display_nome");
+  w.innerHTML = `
+    <div class="section-title">Selecione a fazenda da visita</div>
+    <input id="fazSearch" placeholder="🔎 Buscar por produtor ou fazenda…" />
+    <div class="spacer"></div>
+    <div class="list" id="fazList"></div>
+    <div class="divider"></div>
+    <button class="btn ghost" onclick="viewNovaFazenda()">➕ Fazenda fora da lista? Cadastrar nova</button>
+  `;
+  const render=(term="")=>{
+    const t=term.toLowerCase();
+    const list=(faz||[]).filter(f=>f.display_nome.toLowerCase().includes(t));
+    $("#fazList").innerHTML = list.length? list.map(f=>`
+      <div class="item">
+        <div class="grow"><div class="title">${f.display_nome}</div>
+          <div class="sub">${f.cidade||""} ${f.estado?"· "+f.estado:""} ${f.criada_em_campo?'· <span class="badge warn">campo</span>':""}</div></div>
+        <button class="btn small" onclick='selFazenda(${JSON.stringify(f)})'>Abrir</button>
+      </div>`).join("")
+      : `<p class="hint">Nenhuma fazenda encontrada. Use o botão abaixo para cadastrar.</p>`;
+  };
+  render(); $("#fazSearch").oninput=e=>render(e.target.value);
+}
+
+function viewNovaFazenda(){
+  const w=$("#cwrap");
+  w.innerHTML = `
+    <div class="section-title">Cadastrar nova fazenda (campo)</div>
+    <div class="card">
+      <label>Nome do produtor</label><input id="nf_prod" placeholder="Ex.: João da Silva"/>
+      <label>Nome da fazenda</label><input id="nf_faz" placeholder="Ex.: Sítio Santa Clara"/>
+      <div class="grid2">
+        <div><label>Cidade</label><input id="nf_cid" placeholder="Opcional"/></div>
+        <div><label>Estado</label><input id="nf_uf" placeholder="Ex.: ES"/></div>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn" id="nf_save">Salvar e abrir</button>
+      <button class="btn secondary" onclick="viewFazendas()" style="margin-top:8px">Cancelar</button>
+      <p class="hint">A fazenda aparecerá para você como <b>“Produtor - Fazenda”</b> e será vinculada
+      automaticamente à sua conta.</p>
+    </div>`;
+  $("#nf_save").onclick=async()=>guard(async()=>{
+    const produtor=$("#nf_prod").value.trim().toUpperCase(), fazenda=$("#nf_faz").value.trim().toUpperCase();
+    if(!produtor||!fazenda) return toast("Informe produtor e fazenda","err");
+    const b=$("#nf_save"); b.innerHTML='<span class="loader"></span> Salvando…'; b.disabled=true;
+    const { data, error } = await sb.from("fazendas").insert({
+      produtor, fazenda, cidade:$("#nf_cid").value.trim()||null, estado:$("#nf_uf").value.trim().toUpperCase()||null,
+      created_by:state.user.id
+    }).select().single();
+    if(error){ b.disabled=false; b.textContent="Salvar e abrir"; return toast(error.message,"err"); }
+    toast("Fazenda cadastrada","ok"); selFazenda(data);
+  });
+}
+
+async function selFazenda(f){
+  state.fazenda=f;
+  const w=$("#cwrap"); w.innerHTML=`<div class="center" style="padding:30px"><span class="loader dark"></span></div>`;
+  const { data:talhoes } = await sb.from("talhoes").select("*").eq("fazenda_id",f.id).order("nome");
+  w.innerHTML = `
+    <button class="btn ghost small" onclick="viewFazendas()">← Fazendas</button>
+    <div class="card">
+      <h2>${f.display_nome}</h2>
+      <div class="sub hint">${f.cidade||""} ${f.estado?"· "+f.estado:""} ${f.cafeeira?"· "+f.cafeeira:""}</div>
+    </div>
+    <div class="section-title">Talhões</div>
+    <div class="list" id="talhaoList"></div>
+    <div class="spacer"></div>
+    <button class="btn ghost" onclick="talhaoForm()">➕ Cadastrar talhão</button>
+  `;
+  const renderT=(list)=> $("#talhaoList").innerHTML = list.length? list.map(t=>`
+      <div class="item">
+        <div class="grow"><div class="title">${t.nome}</div>
+          <div class="sub">${t.area_ha} ha</div></div>
+        <button class="btn small secondary" onclick='talhaoForm(${JSON.stringify(t)})'>✏️</button>
+        <button class="btn small danger" onclick="delTalhao('${t.id}')">🗑</button>
+        <button class="btn small" onclick='iniciarVisita(${JSON.stringify(t)})'>Visitar</button>
+      </div>`).join("")
+    : `<p class="hint">Nenhum talhão. Cadastre ao menos um para iniciar a visita.</p>`;
+  renderT(talhoes||[]);
+  state._reloadTalhoes=async()=>{ const {data}=await sb.from("talhoes").select("*")
+    .eq("fazenda_id",f.id).order("nome"); renderT(data||[]); };
+}
+
+function talhaoForm(t=null){
+  const edit=!!t;
+  const w=$("#cwrap");
+  const back=w.innerHTML; state._talhaoBack=back;
+  w.insertAdjacentHTML("afterbegin",`<div class="card" id="talhaoCard">
+    <h2>${edit?"Editar":"Novo"} talhão</h2>
+    <label>Nome / identificação</label><input id="t_nome" value="${edit?t.nome:''}" placeholder="Ex.: Talhão 1 - Conilon"/>
+    <label>Área (ha) *</label><input id="t_area" type="number" step="0.01" min="0.01" value="${edit?t.area_ha:''}" placeholder="Ex.: 3.50"/>
+    <p class="hint">A área é obrigatória e permite calcular NPK também em kg totais no dashboard.</p>
+    <div class="spacer"></div>
+    <button class="btn" id="t_save">${edit?"Salvar alterações":"Cadastrar"}</button>
+    <button class="btn secondary" onclick="selFazenda(state.fazenda)" style="margin-top:8px">Cancelar</button>
+  </div>`);
+  $("#t_save").onclick=async()=>guard(async()=>{
+    const nome=$("#t_nome").value.trim(), area=num($("#t_area").value);
+    if(!nome) return toast("Informe o nome do talhão","err");
+    if(area<=0) return toast("Área (ha) é obrigatória e deve ser > 0","err");
+    const payload={fazenda_id:state.fazenda.id, nome, area_ha:area, criado_por:state.user.id};
+    const q = edit ? sb.from("talhoes").update({nome,area_ha:area}).eq("id",t.id)
+                   : sb.from("talhoes").insert(payload);
+    const { error } = await q;
+    if(error) return toast(error.message,"err");
+    toast(edit?"Talhão atualizado":"Talhão cadastrado","ok"); selFazenda(state.fazenda);
+  });
+}
+async function delTalhao(id){
+  if(!confirm("Excluir este talhão? Visitas já registradas são mantidas.")) return;
+  const { error } = await sb.from("talhoes").delete().eq("id",id);
+  if(error) return toast(error.message,"err");
+  toast("Talhão excluído","ok"); selFazenda(state.fazenda);
+}
+function setTab(t){ state.tab=t; const nav=$(".bottomnav");
+  if(nav){ $$(".bottomnav button").forEach((b,i)=>b.classList.toggle("on",
+    (t==='visita'&&i===0)||(t==='hist'&&i===1))); } }
+
+/* =====================================================================
+   FORMULÁRIO DE VISITA (item 5) + evidências + continuidade
+   ===================================================================== */
+async function iniciarVisita(talhao){
+  state.talhao=talhao;
+  // rascunho da visita em memória
+  state.draft = { observacoes:[], nutricao:[], cpd:[], herb:[], fotos:[], checks:[] };
+  const w=$("#cwrap");
+  w.innerHTML=`<div class="center" style="padding:24px"><span class="loader dark"></span> Carregando visita anterior…</div>`;
+
+  // Continuidade (item 7): recomendações da última visita deste talhão/fazenda
+  const prev = await carregarRecomendacoesAnteriores();
+
+  const now = new Date(); now.setMinutes(now.getMinutes()-now.getTimezoneOffset());
+  const dtLocal = now.toISOString().slice(0,16);
+
+  w.innerHTML = `
+    <button class="btn ghost small" onclick="selFazenda(state.fazenda)">← Talhões</button>
+    <div class="card">
+      <h2>Nova visita</h2>
+      <div class="hint">${state.fazenda.display_nome} · ${talhao.nome} (${talhao.area_ha} ha)</div>
+    </div>
+
+    <div class="section-title">Dados da visita</div>
+    <div class="card">
+      <label>Data e hora de início</label><input id="v_inicio" type="datetime-local" value="${dtLocal}"/>
+      <label>Responsável por acompanhar</label><input id="v_resp" placeholder="Nome de quem acompanhou"/>
+      <label>Motivo da visita</label><input id="v_motivo" placeholder="Ex.: acompanhamento de florada"/>
+    </div>
+
+    ${prev.html}
+
+    <div class="section-title">Observações da visita</div>
+    <div class="card" id="obsCard">
+      <div class="chips" id="obsChips"></div>
+      <div id="obsDetails"></div>
+    </div>
+
+    <div class="section-title">Manejo da lavoura</div>
+    <div class="card">
+      <label>Tipo de adubação</label>
+      <div class="chips">
+        <button class="chip" data-adub="correcao" onclick="pickAdub(this)">Correção</button>
+        <button class="chip" data-adub="manutencao" onclick="pickAdub(this)">Manutenção</button>
+      </div>
+
+      <div class="subblock">
+        <b>5.1 Nutrição</b>
+        <div id="nutriList"></div>
+        <select id="nutriSel"><option value="">+ Adicionar fertilizante…</option>
+          ${state.catalogos.fert.map(f=>`<option value="${f.id}">${f.nome}</option>`).join("")}</select>
+        <div class="npk-summary" id="npkSummary"></div>
+        <label>Observações da nutrição</label><textarea id="obs_nutri" rows="2"></textarea>
+      </div>
+
+      <div class="subblock">
+        <b>5.2 Controle de Pragas e Doenças</b>
+        <div id="cpdList"></div>
+        <select id="cpdSel"><option value="">+ Adicionar defensivo…</option>
+          ${state.catalogos.cpd.map(c=>`<option value="${c.id}">${c.molecula}</option>`).join("")}</select>
+        <label>Observações CPD</label><textarea id="obs_cpd" rows="2"></textarea>
+      </div>
+
+      <div class="subblock">
+        <b>5.3 Controle de Plantas Daninhas</b>
+        <div id="herbList"></div>
+        <select id="herbSel"><option value="">+ Adicionar herbicida…</option>
+          ${state.catalogos.herb.map(h=>`<option value="${h.id}">${h.molecula}</option>`).join("")}</select>
+        <label>Observações herbicidas</label><textarea id="obs_herb" rows="2"></textarea>
+      </div>
+    </div>
+
+    <div class="section-title">Evidências fotográficas</div>
+    <div class="card">
+      <p class="hint">📍 As fotos <b>não</b> são enviadas ao Supabase — ficam no seu dispositivo.
+      Salvamos apenas <b>data/hora/GPS</b> no banco e você pode <b>exportar as fotos</b> ao final.</p>
+      <input id="photoInput" type="file" accept="image/*" capture="environment" multiple style="display:none"/>
+      <button class="btn secondary" onclick="$('#photoInput').click()">📷 Adicionar foto(s)</button>
+      <div class="spacer"></div>
+      <div class="photogrid" id="photoGrid"></div>
+    </div>
+
+    <div class="spacer"></div>
+    <button class="btn" id="btnSalvarVisita">💾 Salvar visita</button>
+    <div class="spacer"></div>
+    <div class="spacer"></div>
+  `;
+
+  buildObsChips(); renderNutri(); renderCPD(); renderHerb(); renderPhotos();
+  $("#nutriSel").onchange=e=>{ if(e.target.value){ addNutri(+e.target.value); e.target.value=""; } };
+  $("#cpdSel").onchange  =e=>{ if(e.target.value){ addCPD(+e.target.value);  e.target.value=""; } };
+  $("#herbSel").onchange =e=>{ if(e.target.value){ addHerb(+e.target.value); e.target.value=""; } };
+  $("#photoInput").onchange=onPhotos;
+  $("#btnSalvarVisita").onclick=salvarVisita;
+}
+
+/* ---------- Observações (item 5.4) ---------- */
+function buildObsChips(){
+  const wrap=$("#obsChips");
+  wrap.innerHTML = OBS_CATEGORIAS.map(c=>`<button class="chip" data-obs="${c}" onclick="toggleObs(this)">${c}</button>`).join("");
+}
+function toggleObs(btn){
+  const cat=btn.dataset.obs;
+  const excl = cat===OBS_EXCLUSIVA;
+  const on = btn.classList.contains("on");
+  if(excl && !on){ // ativar "Nenhum problema": limpa as demais
+    $$("#obsChips .chip").forEach(b=>b.classList.remove("on"));
+    state.draft.observacoes=[];
+    btn.classList.add("on");
+  } else {
+    if(!excl){ $(`#obsChips .chip[data-obs="${OBS_EXCLUSIVA}"]`).classList.remove("on"); }
+    btn.classList.toggle("on");
+  }
+  syncObsDetails();
+}
+function syncObsDetails(){
+  const active=$$("#obsChips .chip.on").map(b=>b.dataset.obs).filter(c=>c!==OBS_EXCLUSIVA);
+  const cont=$("#obsDetails");
+  cont.innerHTML = active.map(cat=>{
+    const prev=state.draft.observacoes.find(o=>o.categoria===cat)||{};
+    return `<div class="subblock"><b>${cat}</b>
+      <label>O que foi observado</label>
+      <textarea rows="2" data-obs-obs="${cat}">${prev.observado||""}</textarea>
+      <label>Ação a ser adotada</label>
+      <textarea rows="2" data-obs-acao="${cat}">${prev.acao||""}</textarea></div>`;
+  }).join("");
+}
+function collectObs(){
+  const nenhum=$(`#obsChips .chip[data-obs="${OBS_EXCLUSIVA}"]`)?.classList.contains("on");
+  if(nenhum) return [{categoria:OBS_EXCLUSIVA, observado:null, acao:null}];
+  return $$("#obsDetails [data-obs-obs]").map(t=>{
+    const cat=t.dataset.obsObs;
+    return {categoria:cat, observado:t.value||null,
+            acao:$(`#obsDetails [data-obs-acao="${cat}"]`)?.value||null};
+  });
+}
+
+/* ---------- Nutrição + cálculo NPK (item 5.1) ---------- */
+let _adub=null;
+function pickAdub(btn){ _adub=btn.dataset.adub;
+  $$('[data-adub]').forEach(b=>b.classList.toggle("on", b===btn)); }
+function addNutri(fid){ const f=state.catalogos.fert.find(x=>x.id===fid);
+  state.draft.nutricao.push({fert_id:f.id, fert_nome:f.nome, dose:0, f}); renderNutri(); }
+function renderNutri(){
+  const box=$("#nutriList");
+  box.innerHTML = state.draft.nutricao.map((n,i)=>`
+    <div class="nutri-line">
+      <span>${n.fert_nome}</span>
+      <input type="number" step="1" min="0" placeholder="kg/ha" value="${n.dose||''}"
+        oninput="state.draft.nutricao[${i}].dose=num(this.value);calcNPK()"/>
+      <button class="btn small danger" onclick="state.draft.nutricao.splice(${i},1);renderNutri()">✕</button>
+    </div>`).join("");
+  calcNPK();
+}
+function calcNPK(){
+  let tot={};
+  state.draft.nutricao.forEach(n=>{
+    const d=num(n.dose), f=n.f;
+    ["n","p2o5","k2o","ca","mg","s","b","cu","fe","mn","mo","zn"].forEach(k=>{
+      tot[k]=(tot[k]||0)+d*(num(f[k])/100);
+    });
+  });
+  state.draft._npk=tot;
+  $("#npkSummary").innerHTML = `
+    <div class="npk-box"><div class="badge n">N</div><div class="v">${(tot.n||0).toFixed(1)}</div><div class="hint">kg/ha</div></div>
+    <div class="npk-box"><div class="badge p">P₂O₅</div><div class="v">${(tot.p2o5||0).toFixed(1)}</div><div class="hint">kg/ha</div></div>
+    <div class="npk-box"><div class="badge k">K₂O</div><div class="v">${(tot.k2o||0).toFixed(1)}</div><div class="hint">kg/ha</div></div>`;
+}
+
+/* ---------- CPD e Herbicidas (5.2 / 5.3) ---------- */
+function addCPD(id){ const c=state.catalogos.cpd.find(x=>x.id===id);
+  state.draft.cpd.push({cpd_id:c.id, cpd_nome:c.molecula, dose:0, unidade:"L/ha"}); renderCPD(); }
+function renderCPD(){
+  $("#cpdList").innerHTML = state.draft.cpd.map((c,i)=>doseLine(c,i,"cpd")).join("");
+}
+function addHerb(id){ const h=state.catalogos.herb.find(x=>x.id===id);
+  state.draft.herb.push({herb_id:h.id, herb_nome:h.molecula, dose:0, unidade:"L/ha"}); renderHerb(); }
+function renderHerb(){
+  $("#herbList").innerHTML = state.draft.herb.map((h,i)=>doseLine(h,i,"herb")).join("");
+}
+function doseLine(o,i,kind){
+  const nome=kind==="cpd"?o.cpd_nome:o.herb_nome;
+  return `<div class="nutri-line" style="grid-template-columns:1fr 80px 74px 34px">
+    <span>${nome}</span>
+    <input type="number" step="0.01" min="0" placeholder="dose" value="${o.dose||''}"
+      oninput="state.draft.${kind}[${i}].dose=num(this.value)"/>
+    <select onchange="state.draft.${kind}[${i}].unidade=this.value">
+      <option ${o.unidade==='L/ha'?'selected':''}>L/ha</option>
+      <option ${o.unidade==='kg/ha'?'selected':''}>kg/ha</option>
+    </select>
+    <button class="btn small danger" onclick="state.draft.${kind}.splice(${i},1);render${kind==='cpd'?'CPD':'Herb'}()">✕</button>
+  </div>`;
+}
+
+/* ---------- Evidências fotográficas (item 8) ---------- */
+async function getGPS(){
+  return new Promise(res=>{
+    if(!navigator.geolocation) return res(null);
+    navigator.geolocation.getCurrentPosition(
+      p=>res({lat:p.coords.latitude, lon:p.coords.longitude}),
+      ()=>res(null), {enableHighAccuracy:true, timeout:6000});
+  });
+}
+async function onPhotos(e){
+  const files=[...e.target.files]; e.target.value="";
+  for(const file of files){
+    const gps=await getGPS();
+    const url=URL.createObjectURL(file);
+    state.draft.fotos.push({file, url, capturado_em:new Date().toISOString(),
+      lat:gps?.lat??null, lon:gps?.lon??null});
+  }
+  renderPhotos();
+}
+function renderPhotos(){
+  $("#photoGrid").innerHTML = state.draft.fotos.map((p,i)=>`
+    <div class="photo"><img src="${p.url}"/>
+      <div class="meta">📅 ${fmtDate(p.capturado_em)}<br/>
+      📍 ${p.lat!=null?p.lat.toFixed(5)+", "+p.lon.toFixed(5):"sem GPS"}</div>
+      <button class="btn small danger" style="width:100%;border-radius:0"
+        onclick="state.draft.fotos.splice(${i},1);renderPhotos()">Remover</button>
+    </div>`).join("");
+}
+
+/* ---------- Continuidade entre visitas (item 7) ---------- */
+async function carregarRecomendacoesAnteriores(){
+  const { data:prev } = await sb.from("visitas").select("id,inicio_em")
+    .eq("fazenda_id",state.fazenda.id).order("inicio_em",{ascending:false}).limit(1);
+  if(!prev||!prev.length) return {html:""};
+  const vid=prev[0].id;
+  const [n,c,h,o] = await Promise.all([
+    sb.from("visita_nutricao").select("fert_nome,dose_kg_ha").eq("visita_id",vid),
+    sb.from("visita_cpd").select("cpd_nome,dose,unidade").eq("visita_id",vid),
+    sb.from("visita_herb").select("herb_nome,dose,unidade").eq("visita_id",vid),
+    sb.from("visita_observacoes").select("categoria,acao").eq("visita_id",vid),
+  ]);
+  const recs=[];
+  (n.data||[]).forEach(x=>recs.push({tipo:"nutricao",descricao:`${x.fert_nome} — ${x.dose_kg_ha} kg/ha`}));
+  (c.data||[]).forEach(x=>recs.push({tipo:"cpd",descricao:`${x.cpd_nome} — ${x.dose} ${x.unidade}`}));
+  (h.data||[]).forEach(x=>recs.push({tipo:"herb",descricao:`${x.herb_nome} — ${x.dose} ${x.unidade}`}));
+  (o.data||[]).forEach(x=>{ if(x.acao) recs.push({tipo:"acao",descricao:`${x.categoria}: ${x.acao}`}); });
+  if(!recs.length) return {html:""};
+  state.draft._origem=vid;
+  state.draft.checks=recs.map(r=>({...r,seguida:false}));
+  const html=`
+    <div class="section-title">Continuidade — visita de ${fmtDay(prev[0].inicio_em)}</div>
+    <div class="card"><p class="hint">Marque o que o produtor seguiu desde a última visita:</p>
+      <div id="checksList">${state.draft.checks.map((r,i)=>`
+        <div class="check"><input type="checkbox" onchange="state.draft.checks[${i}].seguida=this.checked"/>
+        <div class="lbl"><span class="badge ${r.tipo==='nutricao'?'ok':r.tipo==='cpd'?'warn':r.tipo==='herb'?'n':'dang'}">${r.tipo}</span>
+        ${r.descricao}</div></div>`).join("")}</div>
+    </div>`;
+  return {html};
+}
+
+/* ---------- SALVAR (persistência no Supabase) ---------- */
+async function salvarVisita(){
+  await guard(async()=>{
+    if(!_adub) return toast("Selecione o tipo de adubação (correção/manutenção)","err");
+    const inicio=$("#v_inicio").value;
+    if(!inicio) return toast("Informe a data/hora de início","err");
+    const b=$("#btnSalvarVisita"); b.innerHTML='<span class="loader"></span> Salvando…'; b.disabled=true;
+
+    // 1) cabeçalho da visita
+    const { data:vis, error:e1 } = await sb.from("visitas").insert({
+      fazenda_id:state.fazenda.id, talhao_id:state.talhao.id, consultor_id:state.user.id,
+      inicio_em:new Date(inicio).toISOString(),
+      responsavel:$("#v_resp").value||null, motivo:$("#v_motivo").value||null,
+      tipo_adub:_adub, obs_nutricao:$("#obs_nutri").value||null,
+      obs_cpd:$("#obs_cpd").value||null, obs_herb:$("#obs_herb").value||null
+    }).select().single();
+    if(e1){ b.disabled=false; b.textContent="💾 Salvar visita"; return toast(e1.message,"err"); }
+    const vid=vis.id;
+
+    // 2) blocos filhos
+    const obs=collectObs();
+    const jobs=[];
+    if(obs.length) jobs.push(sb.from("visita_observacoes").insert(obs.map(o=>({...o,visita_id:vid}))));
+    if(state.draft.nutricao.length) jobs.push(sb.from("visita_nutricao").insert(
+      state.draft.nutricao.map(n=>({visita_id:vid, fert_id:n.fert_id, fert_nome:n.fert_nome, dose_kg_ha:num(n.dose)}))));
+    if(state.draft.cpd.length) jobs.push(sb.from("visita_cpd").insert(
+      state.draft.cpd.map(c=>({visita_id:vid, cpd_id:c.cpd_id, cpd_nome:c.cpd_nome, dose:num(c.dose), unidade:c.unidade}))));
+    if(state.draft.herb.length) jobs.push(sb.from("visita_herb").insert(
+      state.draft.herb.map(h=>({visita_id:vid, herb_id:h.herb_id, herb_nome:h.herb_nome, dose:num(h.dose), unidade:h.unidade}))));
+    if(state.draft.checks.length) jobs.push(sb.from("visita_recomendacoes_check").insert(
+      state.draft.checks.map(r=>({visita_id:vid, origem_visita_id:state.draft._origem||null,
+        tipo:r.tipo, descricao:r.descricao, seguida:r.seguida}))));
+    if(state.draft.fotos.length) jobs.push(sb.from("evidencias_meta").insert(
+      state.draft.fotos.map(p=>({visita_id:vid, capturado_em:p.capturado_em,
+        latitude:p.lat, longitude:p.lon, ref_local:p.file.name}))));
+    const results=await Promise.all(jobs);
+    const err=results.find(r=>r.error);
+    if(err){ toast("Visita salva, mas houve erro em um bloco: "+err.error.message,"err"); }
+    else toast("Visita salva com sucesso!","ok");
+
+    // guarda referência p/ oferecer exportação
+    state._lastVisitId=vid;
+    telaPosSalvar(vid);
+  });
+}
+
+function telaPosSalvar(vid){
+  const w=$("#cwrap");
+  w.innerHTML=`<div class="card center">
+    <div style="font-size:2rem">✅</div>
+    <h2>Visita registrada</h2>
+    <p class="hint">${state.fazenda.display_nome} · ${state.talhao.nome}</p>
+    <div class="spacer"></div>
+    <button class="btn" onclick='exportarPDFVisita("${vid}")'>📄 Exportar PDF (selecionar seções)</button>
+    <button class="btn secondary" onclick="exportarFotos()" style="margin-top:8px">🖼️ Exportar fotos</button>
+    <button class="btn ghost" onclick="viewFazendas()" style="margin-top:8px">Concluir</button>
+  </div>`;
+}
+
+/* =====================================================================
+   HISTÓRICO (item 6) — somente leitura
+   ===================================================================== */
+async function viewHistoricoPick(){
+  setTab('hist');
+  const w=$("#cwrap");
+  w.innerHTML=`<div class="section-title">Histórico de visitas</div>
+    <div class="center" style="padding:20px"><span class="loader dark"></span></div>`;
+  const { data:vis } = await sb.from("visitas")
+    .select("id,inicio_em,motivo,tipo_adub,fazenda_id,talhao_id,fazendas(display_nome),talhoes(nome)")
+    .order("inicio_em",{ascending:false});
+  if(!vis||!vis.length){ w.innerHTML=`<div class="section-title">Histórico</div>
+    <div class="card"><p class="hint">Nenhuma visita registrada ainda.</p></div>`; return; }
+  w.innerHTML=`<div class="section-title">Histórico de visitas (${vis.length})</div>
+    <div class="list">${vis.map(v=>`
+      <div class="item"><div class="grow">
+        <div class="title">${v.fazendas?.display_nome||""}</div>
+        <div class="sub">${v.talhoes?.nome||""} · ${fmtDate(v.inicio_em)} · <span class="badge ok">${v.tipo_adub||"-"}</span></div>
+      </div>
+      <button class="btn small secondary" onclick="verVisita('${v.id}')">Ver</button>
+      <button class="btn small" onclick='exportarPDFVisita("${v.id}")'>PDF</button>
+      </div>`).join("")}</div>`;
+}
+
+async function carregarVisitaCompleta(vid){
+  const [v,obs,nut,cpd,herb,chk,evi] = await Promise.all([
+    sb.from("visitas").select("*,fazendas(*),talhoes(*),consultores(nome)").eq("id",vid).single(),
+    sb.from("visita_observacoes").select("*").eq("visita_id",vid),
+    sb.from("visita_nutricao").select("*").eq("visita_id",vid),
+    sb.from("visita_cpd").select("*").eq("visita_id",vid),
+    sb.from("visita_herb").select("*").eq("visita_id",vid),
+    sb.from("visita_recomendacoes_check").select("*").eq("visita_id",vid),
+    sb.from("evidencias_meta").select("*").eq("visita_id",vid),
+  ]);
+  return {v:v.data, obs:obs.data||[], nut:nut.data||[], cpd:cpd.data||[],
+          herb:herb.data||[], chk:chk.data||[], evi:evi.data||[]};
+}
+
+async function verVisita(vid){
+  const w=$("#cwrap"); w.innerHTML=`<div class="center" style="padding:24px"><span class="loader dark"></span></div>`;
+  const D=await carregarVisitaCompleta(vid); const v=D.v;
+  const npk=D.nut.reduce((a,n)=>({n:a.n+ +n.n_kg_ha,p:a.p+ +n.p2o5_kg_ha,k:a.k+ +n.k2o_kg_ha}),{n:0,p:0,k:0});
+  w.innerHTML=`
+    <button class="btn ghost small" onclick="viewHistoricoPick()">← Histórico</button>
+    <div class="card"><h2>${v.fazendas.display_nome}</h2>
+      <div class="hint">${v.talhoes?.nome||""} · ${fmtDate(v.inicio_em)} · Consultor: ${v.consultores?.nome||""}</div>
+      <div class="hint">Responsável: ${v.responsavel||"—"} · Motivo: ${v.motivo||"—"} · Adubação: <b>${v.tipo_adub||"—"}</b></div>
+    </div>
+    ${sec("Observações", D.obs.map(o=>`<tr><td>${o.categoria}</td><td>${o.observado||"—"}</td><td>${o.acao||"—"}</td></tr>`).join(""), ["Categoria","Observado","Ação"])}
+    ${sec("Nutrição (NPK kg/ha: N "+npk.n.toFixed(1)+" · P₂O₅ "+npk.p.toFixed(1)+" · K₂O "+npk.k.toFixed(1)+")",
+       D.nut.map(n=>`<tr><td>${n.fert_nome}</td><td>${n.dose_kg_ha}</td><td>${(+n.n_kg_ha).toFixed(1)}/${(+n.p2o5_kg_ha).toFixed(1)}/${(+n.k2o_kg_ha).toFixed(1)}</td></tr>`).join(""), ["Fertilizante","kg/ha","N/P/K"])}
+    ${sec("CPD", D.cpd.map(c=>`<tr><td>${c.cpd_nome}</td><td>${c.dose} ${c.unidade}</td></tr>`).join(""), ["Defensivo","Dose"])}
+    ${sec("Herbicidas", D.herb.map(h=>`<tr><td>${h.herb_nome}</td><td>${h.dose} ${h.unidade}</td></tr>`).join(""), ["Herbicida","Dose"])}
+    ${D.chk.length?sec("Adesão do produtor", D.chk.map(c=>`<tr><td>${c.tipo}</td><td>${c.descricao}</td><td>${c.seguida?"✅":"❌"}</td></tr>`).join(""),["Tipo","Recomendação","Seguiu?"]):""}
+    ${sec("Evidências (metadados)", D.evi.map(e=>`<tr><td>${fmtDate(e.capturado_em)}</td><td>${e.latitude!=null?e.latitude+", "+e.longitude:"sem GPS"}</td></tr>`).join(""),["Data/hora","GPS"])}
+    <button class="btn" onclick='exportarPDFVisita("${vid}")'>📄 Exportar PDF</button>
+    <div class="spacer"></div><div class="spacer"></div>
+  `;
+}
+function sec(title,rows,cols){
+  if(!rows) rows=""; return `<div class="section-title">${title}</div>
+    <div class="card tablewrap"><table><thead><tr>${cols.map(c=>`<th>${c}</th>`).join("")}</tr></thead>
+    <tbody>${rows||`<tr><td colspan="${cols.length}" class="hint">—</td></tr>`}</tbody></table></div>`;
+}
+
+/* =====================================================================
+   EXPORTAÇÃO PDF (item 9) — seleção de seções + nomenclatura obrigatória
+   AAMM_CONSULTOR_RV_PRODUTOR_FAZENDA
+   ===================================================================== */
+async function exportarPDFVisita(vid){
+  const D=await carregarVisitaCompleta(vid); const v=D.v;
+  // modal de seleção de seções
+  const modal=document.createElement("div");
+  modal.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:120;display:flex;align-items:center;justify-content:center;padding:16px";
+  const secs=[["cab","Cabeçalho / dados",true],["obs","Observações",true],["nut","Nutrição + NPK",true],
+    ["cpd","CPD",true],["herb","Herbicidas",true],["chk","Adesão do produtor",true],["evi","Evidências (metadados)",true]];
+  modal.innerHTML=`<div class="card" style="max-width:420px;width:100%">
+    <h2>Exportar PDF</h2><p class="hint">Selecione as seções que deseja incluir:</p>
+    ${secs.map(s=>`<label class="check"><input type="checkbox" data-sec="${s[0]}" ${s[2]?"checked":""}/> <span class="lbl">${s[1]}</span></label>`).join("")}
+    <div class="spacer"></div>
+    <button class="btn" id="pdfGo">Gerar PDF</button>
+    <button class="btn secondary" id="pdfCancel" style="margin-top:8px">Cancelar</button>
+  </div>`;
+  document.body.appendChild(modal);
+  $("#pdfCancel",modal).onclick=()=>modal.remove();
+  $("#pdfGo",modal).onclick=()=>{
+    const pick=Object.fromEntries($$("[data-sec]",modal).map(c=>[c.dataset.sec,c.checked]));
+    modal.remove(); gerarPDF(D,pick);
+  };
+}
+
+function nomeArquivoPDF(v){
+  const d=new Date(v.inicio_em);
+  const aamm=String(d.getFullYear()).slice(2)+String(d.getMonth()+1).padStart(2,"0");
+  return `${aamm}_${camel(v.consultores?.nome||"Consultor")}_RV_${camel(v.fazendas.produtor)}_${camel(v.fazendas.fazenda)}.pdf`;
+}
+
+function gerarPDF(D,pick){
+  const { jsPDF }=window.jspdf; const doc=new jsPDF({unit:"pt",format:"a4"});
+  const v=D.v; const W=doc.internal.pageSize.getWidth(); let y=48;
+  // header clean
+  doc.setFillColor(15,123,108); doc.rect(0,0,W,70,"F");
+  doc.setTextColor(255); doc.setFontSize(15); doc.text("Relatório de Visita Técnica",40,34);
+  doc.setFontSize(9); doc.text("Parceria Nescafé × SOIL · Cafeicultura",40,52);
+  doc.setTextColor(30,40,35); y=92;
+
+  if(pick.cab){
+    doc.setFontSize(12); doc.setTextColor(11,92,81);
+    doc.text(v.fazendas.display_nome,40,y); y+=16;
+    doc.setFontSize(9); doc.setTextColor(80,90,84);
+    const linhas=[
+      `Talhão: ${v.talhoes?.nome||"—"} (${v.talhoes?.area_ha||"—"} ha)`,
+      `Data/hora: ${fmtDate(v.inicio_em)}`,
+      `Consultor: ${v.consultores?.nome||"—"}`,
+      `Responsável: ${v.responsavel||"—"}   ·   Motivo: ${v.motivo||"—"}`,
+      `Tipo de adubação: ${v.tipo_adub||"—"}`,
+    ];
+    linhas.forEach(l=>{doc.text(l,40,y); y+=13;}); y+=6;
+  }
+  const t=(head,body)=>{ if(!body.length) return;
+    doc.autoTable({startY:y, head:[head], body, theme:"grid",
+      headStyles:{fillColor:[230,244,241],textColor:[11,92,81],fontStyle:"bold"},
+      styles:{fontSize:8,cellPadding:4,textColor:[30,40,35]},
+      alternateRowStyles:{fillColor:[250,253,252]}, margin:{left:40,right:40}});
+    y=doc.lastAutoTable.finalY+16; };
+
+  if(pick.obs) t(["Observação","O que foi observado","Ação a adotar"],
+    D.obs.map(o=>[o.categoria,o.observado||"—",o.acao||"—"]));
+  if(pick.nut){
+    const npk=D.nut.reduce((a,n)=>({n:a.n+ +n.n_kg_ha,p:a.p+ +n.p2o5_kg_ha,k:a.k+ +n.k2o_kg_ha}),{n:0,p:0,k:0});
+    t(["Fertilizante","Dose (kg/ha)","N","P₂O₅","K₂O"],
+      D.nut.map(n=>[n.fert_nome,n.dose_kg_ha,(+n.n_kg_ha).toFixed(1),(+n.p2o5_kg_ha).toFixed(1),(+n.k2o_kg_ha).toFixed(1)])
+        .concat([["TOTAL","",npk.n.toFixed(1),npk.p.toFixed(1),npk.k.toFixed(1)]]));
+  }
+  if(pick.cpd) t(["Defensivo (CPD)","Dose"], D.cpd.map(c=>[c.cpd_nome,`${c.dose} ${c.unidade}`]));
+  if(pick.herb) t(["Herbicida","Dose"], D.herb.map(h=>[h.herb_nome,`${h.dose} ${h.unidade}`]));
+  if(pick.chk) t(["Tipo","Recomendação anterior","Seguiu?"],
+    D.chk.map(c=>[c.tipo,c.descricao,c.seguida?"Sim":"Não"]));
+  if(pick.evi) t(["Data/hora da foto","Latitude","Longitude"],
+    D.evi.map(e=>[fmtDate(e.capturado_em),e.latitude??"—",e.longitude??"—"]));
+
+  doc.setFontSize(7); doc.setTextColor(150);
+  doc.text("Gerado pelo App de Visitas Técnicas · Nescafé × SOIL",40,doc.internal.pageSize.getHeight()-24);
+  doc.save(nomeArquivoPDF(v));
+  toast("PDF gerado","ok");
+}
+
+/* ---------- Exportar fotos (item 9) ---------- */
+function exportarFotos(){
+  if(!state.draft || !state.draft.fotos.length) return toast("Nenhuma foto nesta visita","err");
+  state.draft.fotos.forEach((p,i)=>{
+    const a=document.createElement("a"); a.href=p.url;
+    const d=new Date(p.capturado_em); const aamm=String(d.getFullYear()).slice(2)+String(d.getMonth()+1).padStart(2,"0");
+    a.download=`${aamm}_${camel(state.profile.nome)}_${camel(state.fazenda.produtor)}_${camel(state.fazenda.fazenda)}_foto${i+1}.jpg`;
+    document.body.appendChild(a); a.click(); a.remove();
+  });
+  toast("Fotos exportadas para download","ok");
+}
+
+/* =====================================================================
+   DASHBOARD EXECUTIVO (item 11) — exclusivo ADMIN
+   ===================================================================== */
+const A = { data:null, charts:{} };
+
+async function renderAdmin(){
+  root.innerHTML = topbar("Admin · Dashboard") + `<div class="app" id="awrap">
+    <div class="chips" style="margin-bottom:6px">
+      <button class="chip on" id="navDash" onclick="adminTab('dash')">📊 Dashboard</button>
+      <button class="chip" id="navUsers" onclick="adminTab('users')">👥 Consultores</button>
+    </div>
+    <div id="adminBody"><div class="center" style="padding:30px"><span class="loader dark"></span></div></div>
+  </div>`;
+  await loadAdminData();
+  renderDash();
+}
+
+async function loadAdminData(){
+  const [vis, faz, npk, obs, tf, tc, th, ade, st, kpi] = await Promise.all([
+    sb.from("vw_visitas_base").select("*"),
+    sb.from("fazendas").select("*"),
+    sb.from("vw_npk_por_fazenda").select("*"),
+    sb.from("vw_obs_ranking").select("*"),
+    sb.from("vw_top_fertilizantes").select("*"),
+    sb.from("vw_top_cpd").select("*"),
+    sb.from("vw_top_herb").select("*"),
+    sb.from("vw_taxa_adesao").select("*"),
+    sb.from("vw_fazendas_status").select("*"),
+    sb.from("vw_kpis_gerais").select("*").maybeSingle(),
+  ]);
+  A.data={vis:vis.data||[], faz:faz.data||[], npk:npk.data||[], obs:obs.data||[],
+    tf:tf.data||[], tc:tc.data||[], th:th.data||[], ade:ade.data||[], st:st.data||[], kpi:kpi.data||{}};
+  A.filters={consultor:"",fazenda:"",ini:"",fim:"",adub:""};
+}
+
+function adminTab(t){
+  $("#navDash").classList.toggle("on",t==="dash");
+  $("#navUsers").classList.toggle("on",t==="users");
+  if(t==="dash") renderDash(); else renderUsers();
+}
+
+/* ---------- filtros ---------- */
+function applyFilters(v){
+  const f=A.filters;
+  return v.filter(x=>{
+    if(f.consultor && x.consultor!==f.consultor) return false;
+    if(f.fazenda && x.fazenda!==f.fazenda) return false;
+    if(f.adub && x.tipo_adub!==f.adub) return false;
+    if(f.ini && new Date(x.inicio_em) < new Date(f.ini)) return false;
+    if(f.fim && new Date(x.inicio_em) > new Date(f.fim+"T23:59:59")) return false;
+    return true;
+  });
+}
+
+function renderDash(){
+  const d=A.data;
+  const consultores=[...new Set(d.vis.map(v=>v.consultor))].sort();
+  const fazendas=[...new Set(d.faz.map(f=>f.display_nome))].sort();
+  $("#adminBody").innerHTML=`
+    <div class="section-title">Filtros globais</div>
+    <div class="card"><div class="filters">
+      <div><label>Consultor</label><select id="fc"><option value="">Todos</option>${consultores.map(c=>`<option>${c}</option>`).join("")}</select></div>
+      <div><label>Fazenda</label><select id="ff"><option value="">Todas</option>${fazendas.map(f=>`<option>${f}</option>`).join("")}</select></div>
+      <div><label>Início</label><input id="fi" type="date"/></div>
+      <div><label>Fim</label><input id="fim" type="date"/></div>
+      <div><label>Adubação</label><select id="fa"><option value="">Ambas</option><option value="correcao">Correção</option><option value="manutencao">Manutenção</option></select></div>
+    </div>
+    <div class="spacer"></div>
+    <div class="row"><button class="btn small" onclick="onFilter()">Aplicar filtros</button>
+      <button class="btn small secondary" onclick="clearFilter()">Limpar</button>
+      <button class="btn small secondary" onclick="exportDashXLSX()">⬇️ XLSX</button>
+      <button class="btn small secondary" onclick="exportDashPDF()">⬇️ PDF</button></div>
+    </div>
+    <div id="dashContent"></div>`;
+  ["fc","ff","fi","fim","fa"].forEach(id=>{const el=$("#"+id); if(el) el.onchange=onFilter;});
+  drawDash();
+}
+function onFilter(){
+  A.filters={consultor:$("#fc").value,fazenda:$("#ff").value,ini:$("#fi").value,fim:$("#fim").value,adub:$("#fa").value};
+  drawDash();
+}
+function clearFilter(){ A.filters={consultor:"",fazenda:"",ini:"",fim:"",adub:""};
+  ["fc","ff","fa"].forEach(i=>$("#"+i).value=""); ["fi","fim"].forEach(i=>$("#"+i).value=""); drawDash(); }
+
+function drawDash(){
+  const d=A.data; const vis=applyFilters(d.vis);
+  // KPIs período
+  const total=vis.length;
+  const consultoresAtivos=new Set(vis.map(v=>v.consultor)).size;
+  const fazVisit=new Set(vis.map(v=>v.fazenda_id)).size;
+  // comparação período anterior (mesma janela deslocada) se datas informadas
+  let deltaHtml="";
+  if(A.filters.ini && A.filters.fim){
+    const ini=new Date(A.filters.ini), fim=new Date(A.filters.fim);
+    const span=fim-ini; const pIni=new Date(ini-span), pFim=new Date(ini-1);
+    const prev=d.vis.filter(v=>{const t=new Date(v.inicio_em); return t>=pIni&&t<=pFim
+      && (!A.filters.consultor||v.consultor===A.filters.consultor)
+      && (!A.filters.fazenda||v.fazenda===A.filters.fazenda)
+      && (!A.filters.adub||v.tipo_adub===A.filters.adub);}).length;
+    const diff=total-prev; const sign=diff>=0?"▲":"▼"; const col=diff>=0?"var(--ok)":"var(--danger)";
+    deltaHtml=`<div class="d" style="color:${col}">${sign} ${Math.abs(diff)} vs. período anterior (${prev})</div>`;
+  }
+  // Fazendas não visitadas (no período): total de fazendas - visitadas
+  const totalFaz=d.faz.length;
+  const naoVisit=totalFaz-fazVisit;
+  const pctNao=totalFaz?((naoVisit/totalFaz)*100).toFixed(0):0;
+
+  // NPK filtrado
+  const npk=d.npk.filter(x=>(!A.filters.fazenda||x.fazenda===A.filters.fazenda)
+    && (!A.filters.adub||x.tipo_adub===A.filters.adub)
+    && (!A.filters.ini||x.ano_mes>=A.filters.ini.slice(0,7))
+    && (!A.filters.fim||x.ano_mes<=A.filters.fim.slice(0,7)));
+
+  $("#dashContent").innerHTML=`
+    <div class="section-title">Visão geral</div>
+    <div class="kpis">
+      <div class="kpi"><div class="v">${total}</div><div class="l">Visitas no período</div>${deltaHtml}</div>
+      <div class="kpi"><div class="v">${naoVisit}</div><div class="l">Fazendas não visitadas</div><div class="d">${pctNao}% do total (${totalFaz})</div></div>
+      <div class="kpi"><div class="v">${consultoresAtivos}</div><div class="l">Consultores ativos</div></div>
+      <div class="kpi"><div class="v">${fazVisit}</div><div class="l">Fazendas visitadas</div></div>
+      <div class="kpi"><div class="v">${d.kpi.evidencias_total||0}</div><div class="l">Evidências (total)</div></div>
+      <div class="kpi"><div class="v">${d.kpi.media_visitas_por_consultor||0}</div><div class="l">Média visitas/consultor</div></div>
+    </div>
+
+    <div class="section-title">11.1 · Visitas ao longo do tempo</div>
+    <div class="card"><div class="chartbox"><canvas id="chTempo"></canvas></div></div>
+
+    <div class="section-title">11.1 · Ranking de visitas por consultor</div>
+    <div class="card"><div class="chartbox"><canvas id="chRank"></canvas></div></div>
+
+    <div class="section-title">11.1 · Visitas por consultor e fazenda</div>
+    <div class="card tablewrap"><table><thead><tr><th>Consultor</th><th>Fazenda</th><th>Visitas</th></tr></thead>
+      <tbody>${tableCF(vis)}</tbody></table></div>
+
+    <div class="section-title">11.2 · Fazendas NÃO visitadas (alerta > ${ALERTA_DIAS} dias)</div>
+    <div class="card tablewrap"><table><thead><tr><th>Fazenda</th><th>Consultor</th><th>Última visita</th><th>Dias</th></tr></thead>
+      <tbody>${tableNaoVisit(d.st)}</tbody></table></div>
+
+    <div class="section-title">11.3 · Principais recomendações</div>
+    <div class="grid2">
+      <div class="card"><b>Observações mais frequentes</b><div class="chartbox"><canvas id="chObs"></canvas></div></div>
+      <div class="card"><b>Taxa de adesão do produtor</b><div class="chartbox"><canvas id="chAde"></canvas></div></div>
+    </div>
+    <div class="grid2">
+      <div class="card tablewrap"><b>Top fertilizantes</b>${miniTable(d.tf,["item","recomendacoes"],["Item","Rec."])}</div>
+      <div class="card tablewrap"><b>Top CPD / Herbicidas</b>${miniTable(d.tc.concat(d.th),["item","recomendacoes"],["Item","Rec."])}</div>
+    </div>
+
+    <div class="section-title">11.4 · NPK por fazenda (kg/ha)</div>
+    <div class="card"><div class="chartbox"><canvas id="chNPK"></canvas></div></div>
+    <div class="card tablewrap"><table><thead><tr><th>Fazenda</th><th>Adub.</th><th>N</th><th>P₂O₅</th><th>K₂O</th></tr></thead>
+      <tbody>${tableNPK(npk)}</tbody></table></div>
+    <p class="hint">Área por talhão disponível ⇒ visão em kg totais pode ser habilitada futuramente. Unidade atual: kg/ha.</p>
+    <div class="spacer"></div><div class="spacer"></div>
+  `;
+
+  // ---- gráficos ----
+  drawCharts(vis,d,npk);
+}
+
+function tableCF(vis){
+  const m={}; vis.forEach(v=>{const k=v.consultor+"||"+v.fazenda; m[k]=(m[k]||0)+1;});
+  const rows=Object.entries(m).map(([k,n])=>{const[c,f]=k.split("||");return[c,f,n];})
+    .sort((a,b)=>b[2]-a[2]);
+  return rows.length?rows.map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join("")
+    :`<tr><td colspan="3" class="hint">Sem visitas no filtro.</td></tr>`;
+}
+function tableNaoVisit(st){
+  const rows=st.filter(s=>s.ultima_visita===null || s.dias_sem_visita>ALERTA_DIAS)
+    .sort((a,b)=>(b.dias_sem_visita||9999)-(a.dias_sem_visita||9999));
+  return rows.length?rows.map(s=>{
+    const alert=s.ultima_visita===null||s.dias_sem_visita>ALERTA_DIAS;
+    return `<tr style="${alert?'background:#fff6f4':''}">
+      <td>${s.fazenda}</td><td>${s.consultor_responsavel||"—"}</td>
+      <td>${s.ultima_visita?fmtDay(s.ultima_visita):'<span class="badge dang">nunca</span>'}</td>
+      <td>${s.dias_sem_visita!=null?`<span class="badge ${s.dias_sem_visita>ALERTA_DIAS?'dang':'ok'}">${s.dias_sem_visita}</span>`:"—"}</td></tr>`;
+  }).join(""):`<tr><td colspan="4" class="hint">Todas as fazendas visitadas dentro do prazo. 🎉</td></tr>`;
+}
+function tableNPK(npk){
+  const m={}; npk.forEach(x=>{const k=x.fazenda+"||"+x.tipo_adub;
+    if(!m[k])m[k]={f:x.fazenda,a:x.tipo_adub,n:0,p:0,k:0};
+    m[k].n+= +x.n_kg_ha; m[k].p+= +x.p2o5_kg_ha; m[k].k+= +x.k2o_kg_ha;});
+  const rows=Object.values(m);
+  return rows.length?rows.map(r=>`<tr><td>${r.f}</td><td>${r.a||"—"}</td>
+    <td>${r.n.toFixed(1)}</td><td>${r.p.toFixed(1)}</td><td>${r.k.toFixed(1)}</td></tr>`).join("")
+    :`<tr><td colspan="5" class="hint">Sem dados de nutrição no filtro.</td></tr>`;
+}
+function miniTable(rows,keys,heads){
+  if(!rows.length) return `<p class="hint">—</p>`;
+  return `<table><thead><tr>${heads.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${
+    rows.slice(0,10).map(r=>`<tr>${keys.map(k=>`<td>${r[k]}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+}
+
+function drawCharts(vis,d,npk){
+  Object.values(A.charts).forEach(c=>{try{c.destroy()}catch(e){}}); A.charts={};
+  const green="#0f7b6c", soft="#8fc9bf";
+  // tempo (por mês)
+  const byMonth={}; vis.forEach(v=>{byMonth[v.ano_mes]=(byMonth[v.ano_mes]||0)+1;});
+  const meses=Object.keys(byMonth).sort();
+  A.charts.tempo=new Chart($("#chTempo"),{type:"line",
+    data:{labels:meses,datasets:[{label:"Visitas",data:meses.map(m=>byMonth[m]),
+      borderColor:green,backgroundColor:"rgba(15,123,108,.12)",fill:true,tension:.3}]},
+    options:chartOpts()});
+  // ranking consultor
+  const byC={}; vis.forEach(v=>{byC[v.consultor]=(byC[v.consultor]||0)+1;});
+  const cs=Object.entries(byC).sort((a,b)=>b[1]-a[1]);
+  A.charts.rank=new Chart($("#chRank"),{type:"bar",
+    data:{labels:cs.map(c=>c[0]),datasets:[{label:"Visitas",data:cs.map(c=>c[1]),backgroundColor:green}]},
+    options:chartOpts(true)});
+  // obs
+  A.charts.obs=new Chart($("#chObs"),{type:"bar",
+    data:{labels:d.obs.map(o=>o.categoria),datasets:[{data:d.obs.map(o=>o.ocorrencias),backgroundColor:soft}]},
+    options:{...chartOpts(true),plugins:{legend:{display:false}}}});
+  // adesão
+  const seg=d.ade.reduce((a,x)=>a+ +x.seguidas,0), tot=d.ade.reduce((a,x)=>a+ +x.total,0);
+  A.charts.ade=new Chart($("#chAde"),{type:"doughnut",
+    data:{labels:["Seguidas","Não seguidas"],datasets:[{data:[seg,Math.max(tot-seg,0)],
+      backgroundColor:[green,"#e2b4ab"]}]},options:{responsive:true,maintainAspectRatio:false}});
+  // NPK por fazenda
+  const byF={}; npk.forEach(x=>{if(!byF[x.fazenda])byF[x.fazenda]={n:0,p:0,k:0};
+    byF[x.fazenda].n+= +x.n_kg_ha; byF[x.fazenda].p+= +x.p2o5_kg_ha; byF[x.fazenda].k+= +x.k2o_kg_ha;});
+  const fl=Object.keys(byF).slice(0,12);
+  A.charts.npk=new Chart($("#chNPK"),{type:"bar",
+    data:{labels:fl,datasets:[
+      {label:"N",data:fl.map(f=>byF[f].n),backgroundColor:"#2d6cdf"},
+      {label:"P₂O₅",data:fl.map(f=>byF[f].p),backgroundColor:"#8e44ad"},
+      {label:"K₂O",data:fl.map(f=>byF[f].k),backgroundColor:"#e08e0b"}]},
+    options:chartOpts()});
+}
+function chartOpts(horizontalHint){
+  return {responsive:true,maintainAspectRatio:false,
+    plugins:{legend:{labels:{color:"#12261f"}}},
+    scales:{x:{ticks:{color:"#5b6b64",maxRotation:60,minRotation:0}},
+            y:{ticks:{color:"#5b6b64"},beginAtZero:true}}};
+}
+
+/* =====================================================================
+   ADMIN · gestão de consultores (aprovar/bloquear/remover)
+   ===================================================================== */
+async function renderUsers(){
+  $("#adminBody").innerHTML=`<div class="center" style="padding:24px"><span class="loader dark"></span></div>`;
+  const { data } = await sb.from("consultores").select("*").order("status").order("nome");
+  const badge=s=>s==="aprovado"?'<span class="badge ok">aprovado</span>'
+    :s==="pendente"?'<span class="badge warn">pendente</span>':'<span class="badge dang">bloqueado</span>';
+  $("#adminBody").innerHTML=`
+    <div class="section-title">Consultores (${data.length})</div>
+    <div class="list">${data.map(u=>`
+      <div class="item"><div class="grow"><div class="title">${u.nome} ${u.role==='admin'?'<span class="badge n">admin</span>':''}</div>
+        <div class="sub">${u.email} · ${badge(u.status)}</div></div>
+        ${u.role==='admin'?'':`
+        ${u.status!=='aprovado'?`<button class="btn small" onclick="setUser('${u.id}','aprovado')">Aprovar</button>`:''}
+        ${u.status!=='bloqueado'?`<button class="btn small secondary" onclick="setUser('${u.id}','bloqueado')">Bloquear</button>`:''}
+        <button class="btn small danger" onclick="delUser('${u.id}')">Remover</button>`}
+      </div>`).join("")}</div>`;
+}
+async function setUser(id,status){
+  const { error } = await sb.from("consultores").update({status}).eq("id",id);
+  if(error) return toast(error.message,"err"); toast("Status atualizado","ok"); renderUsers();
+}
+async function delUser(id){
+  if(!confirm("Remover o perfil deste consultor? (o login no Auth deve ser removido separadamente)")) return;
+  const { error } = await sb.from("consultores").delete().eq("id",id);
+  if(error) return toast(error.message,"err"); toast("Consultor removido","ok"); renderUsers();
+}
+
+/* =====================================================================
+   EXPORTAÇÕES DO DASHBOARD (XLSX p/ Power Query + PDF)
+   ===================================================================== */
+function exportDashXLSX(){
+  const d=A.data; const vis=applyFilters(d.vis);
+  const wb=XLSX.utils.book_new();
+  const cf={}; vis.forEach(v=>{const k=v.consultor+"||"+v.fazenda; cf[k]=(cf[k]||0)+1;});
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+    Object.entries(cf).map(([k,n])=>{const[c,f]=k.split("||");return{Consultor:c,Fazenda:f,Visitas:n};})),"Visitas");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+    d.st.map(s=>({Fazenda:s.fazenda,Consultor:s.consultor_responsavel,
+      Ultima_visita:s.ultima_visita?fmtDay(s.ultima_visita):"nunca",Dias_sem_visita:s.dias_sem_visita})),
+    ),"Fazendas_status");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+    d.npk.map(x=>({Fazenda:x.fazenda,Adubacao:x.tipo_adub,Ano_mes:x.ano_mes,
+      N_kg_ha:x.n_kg_ha,P2O5_kg_ha:x.p2o5_kg_ha,K2O_kg_ha:x.k2o_kg_ha}))),"NPK");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+    d.tf.map(x=>({Item:x.item,Recomendacoes:x.recomendacoes,Dose_total_kg_ha:x.dose_total_kg_ha}))),"Top_Fertilizantes");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.ade),"Adesao");
+  const dt=new Date(); const aamm=String(dt.getFullYear()).slice(2)+String(dt.getMonth()+1).padStart(2,"0");
+  XLSX.writeFile(wb,`${aamm}_Dashboard_NescafeSOIL.xlsx`);
+  toast("XLSX exportado","ok");
+}
+function exportDashPDF(){
+  const { jsPDF }=window.jspdf; const doc=new jsPDF({unit:"pt",format:"a4"});
+  const d=A.data; const vis=applyFilters(d.vis); const W=doc.internal.pageSize.getWidth();
+  doc.setFillColor(15,123,108); doc.rect(0,0,W,64,"F");
+  doc.setTextColor(255); doc.setFontSize(15); doc.text("Dashboard Executivo · Nescafé × SOIL",40,32);
+  doc.setFontSize(9); doc.text("Relatório consolidado de visitas técnicas",40,50);
+  let y=88; doc.setTextColor(30,40,35);
+  const kp=[["Visitas (filtro)",vis.length],["Consultores ativos",new Set(vis.map(v=>v.consultor)).size],
+    ["Fazendas visitadas",new Set(vis.map(v=>v.fazenda_id)).size],["Fazendas (total)",d.faz.length],
+    ["Evidências",d.kpi.evidencias_total||0],["Média visitas/consultor",d.kpi.media_visitas_por_consultor||0]];
+  doc.autoTable({startY:y,head:[["Indicador","Valor"]],body:kp,theme:"grid",
+    headStyles:{fillColor:[230,244,241],textColor:[11,92,81]},styles:{fontSize:9},margin:{left:40,right:40}});
+  y=doc.lastAutoTable.finalY+16;
+  const cf={}; vis.forEach(v=>{const k=v.consultor;cf[k]=(cf[k]||0)+1;});
+  doc.autoTable({startY:y,head:[["Consultor","Visitas"]],
+    body:Object.entries(cf).sort((a,b)=>b[1]-a[1]),theme:"striped",
+    headStyles:{fillColor:[230,244,241],textColor:[11,92,81]},styles:{fontSize:9},margin:{left:40,right:40}});
+  y=doc.lastAutoTable.finalY+16;
+  const alert=d.st.filter(s=>s.ultima_visita===null||s.dias_sem_visita>ALERTA_DIAS)
+    .map(s=>[s.fazenda,s.consultor_responsavel||"—",s.ultima_visita?fmtDay(s.ultima_visita):"nunca",s.dias_sem_visita??"—"]);
+  doc.autoTable({startY:y,head:[["Fazenda não visitada (>"+ALERTA_DIAS+"d)","Consultor","Última","Dias"]],
+    body:alert,theme:"grid",headStyles:{fillColor:[251,228,224],textColor:[192,57,43]},
+    styles:{fontSize:8},margin:{left:40,right:40}});
+  const dt=new Date(); const aamm=String(dt.getFullYear()).slice(2)+String(dt.getMonth()+1).padStart(2,"0");
+  doc.save(`${aamm}_Dashboard_NescafeSOIL.pdf`);
+  toast("PDF do dashboard exportado","ok");
+}
+
+/* ===================== START ===================== */
+initAuth();
+
+</script>
+</body>
+</html>
