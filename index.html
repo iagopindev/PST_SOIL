@@ -508,6 +508,7 @@ function checksHtml(dateLabel){
 async function iniciarVisita(talhao, existing=null){
   state.talhao=talhao;
   state._editVid = existing ? existing.vid : null;
+  state._editVersao = existing ? (existing.versao||1) : 1;   // versão atual do relatório em edição
 
   // rascunho da visita em memória (novo = vazio; edição = dados carregados)
   state.draft = existing ? existing.draft
@@ -844,6 +845,9 @@ async function salvarVisita(){
 
     let vid;
     if(isEdit){
+      // marca a nova versão do relatório (incrementa e registra o momento da edição)
+      header.versao = (state._editVersao||1) + 1;
+      header.editado_em = new Date().toISOString();
       // 1) atualiza o cabeçalho da visita existente
       vid = state._editVid;
       const { error:eu } = await sb.from("visitas").update(header).eq("id",vid);
@@ -929,7 +933,7 @@ async function viewHistoricoPick(){
   w.innerHTML=`<div class="section-title">Histórico de visitas</div>
     <div class="center" style="padding:20px"><span class="loader dark"></span></div>`;
   const { data:vis } = await sb.from("visitas")
-    .select("id,inicio_em,motivo,tipo_adub,consultor_id,fazenda_id,talhao_id,fazendas(display_nome),talhoes(nome)")
+    .select("id,inicio_em,motivo,tipo_adub,versao,editado_em,consultor_id,fazenda_id,talhao_id,fazendas(display_nome),talhoes(nome)")
     .order("inicio_em",{ascending:false});
   if(!vis||!vis.length){ w.innerHTML=`<div class="section-title">Histórico</div>
     <div class="card"><p class="hint">Nenhuma visita registrada ainda.</p></div>`; return; }
@@ -937,7 +941,7 @@ async function viewHistoricoPick(){
     <div class="list">${vis.map(v=>`
       <div class="item"><div class="grow">
         <div class="title">${v.fazendas?.display_nome||""}</div>
-        <div class="sub">${v.talhoes?.nome||""} · ${fmtDate(v.inicio_em)} · <span class="badge ok">${v.tipo_adub||"-"}</span></div>
+        <div class="sub">${v.talhoes?.nome||""} · ${fmtDate(v.inicio_em)} · <span class="badge ok">${v.tipo_adub||"-"}</span>${(v.versao>1)?` · <span class="badge warn" title="Editado em ${fmtDate(v.editado_em)}">v${v.versao} · editado</span>`:` · <span class="hint" style="font-size:.72rem">v1</span>`}</div>
       </div>
       ${v.consultor_id===state.user.id?`<button class="btn small secondary" onclick="editarVisita('${v.id}')">Editar</button>`:''}
       <button class="btn small secondary" onclick="verVisita('${v.id}')">Ver</button>
@@ -993,7 +997,7 @@ async function editarVisita(vid){
       lat:(e.latitude!=null?Number(e.latitude):null), lon:(e.longitude!=null?Number(e.longitude):null), ref_local:e.ref_local}));
 
     const existing = {
-      vid, draft,
+      vid, draft, versao: v.versao||1,
       inicio: toLocalInput(v.inicio_em),
       resp: v.responsavel, motivo: v.motivo,
       obsNutri: v.obs_nutricao||"", obsCpd: v.obs_cpd||"", obsHerb: v.obs_herb||""
@@ -1011,6 +1015,7 @@ async function verVisita(vid){
     <div class="card"><h2>${v.fazendas.display_nome}</h2>
       <div class="hint">${v.talhoes?.nome||""} · ${fmtDate(v.inicio_em)} · Consultor: ${v.consultores?.nome||""}</div>
       <div class="hint">Responsável: ${v.responsavel||"—"} · Motivo: ${v.motivo||"—"} · Adubação: <b>${v.tipo_adub||"—"}</b></div>
+      <div class="hint">${(v.versao>1)?`<span class="badge warn">v${v.versao}</span> Relatório editado em ${fmtDate(v.editado_em)}`:`<span class="hint">Versão v1 (original)</span>`}</div>
     </div>
     ${sec("Observações", D.obs.map(o=>`<tr><td>${o.categoria}</td><td>${o.observado||"—"}</td><td>${o.acao||"—"}</td></tr>`).join(""), ["Categoria","Observado","Ação"])}
     ${sec("Nutrição (NPK kg/ha: N "+npk.n.toFixed(1)+" · P₂O₅ "+npk.p.toFixed(1)+" · K₂O "+npk.k.toFixed(1)+")",
@@ -1064,11 +1069,12 @@ async function exportarPDFVisita(vid){
 function imgFmt(u){ return /image\/png/i.test(u)?'PNG':(/image\/webp/i.test(u)?'WEBP':'JPEG'); }
 /* Sem logo no cabeçalho do PDF (removida a pedido) */
 async function addLogosHeader(doc,W){ return; }
-function nomeArquivoPDF(v){
+function nomeBaseVisita(v){
   const d=new Date(v.inicio_em);
   const aamm=String(d.getFullYear()).slice(2)+String(d.getMonth()+1).padStart(2,"0");
-  return `${aamm}_${camel(v.consultores?.nome||"Consultor")}_RV_${camel(v.fazendas.produtor)}_${camel(v.fazendas.fazenda)}.pdf`;
+  return `${aamm}_${camel(v.consultores?.nome||"Consultor")}_RV_${camel(v.fazendas.produtor)}_${camel(v.fazendas.fazenda)}`;
 }
+function nomeArquivoPDF(v){ return nomeBaseVisita(v)+".pdf"; }
 
 async function gerarPDF(D,pick,fotos=[]){
   const { jsPDF }=window.jspdf; const doc=new jsPDF({unit:"pt",format:"a4"});
@@ -1077,6 +1083,9 @@ async function gerarPDF(D,pick,fotos=[]){
   doc.setFillColor(27,58,91); doc.rect(0,0,W,74,"F");
   doc.setTextColor(255); doc.setFontSize(15); doc.text("Relatório de Visita Técnica",40,34);
   doc.setFontSize(9); doc.text("Projeto Suporte Técnico · Cafeicultura",40,52);
+  // versão (sutil, canto superior direito do cabeçalho)
+  doc.setFontSize(8); doc.setTextColor(214,224,236);
+  doc.text(`v${v.versao||1}${(v.versao>1)?" · editado":""}`, W-40, 34, {align:"right"});
   await addLogosHeader(doc,W);
   doc.setTextColor(15,39,64); y=98;
 
@@ -1090,6 +1099,7 @@ async function gerarPDF(D,pick,fotos=[]){
       `Consultor: ${v.consultores?.nome||"—"}`,
       `Responsável: ${v.responsavel||"—"}   ·   Motivo: ${v.motivo||"—"}`,
       `Tipo de adubação: ${v.tipo_adub||"—"}`,
+      `Versão: v${v.versao||1}${(v.versao>1)?" (editado em "+fmtDate(v.editado_em)+")":" (original)"}`,
     ];
     linhas.forEach(l=>{doc.text(l,40,y); y+=13;}); y+=6;
   }
@@ -1170,6 +1180,7 @@ async function renderAdmin(){
   root.innerHTML = topbar("Admin · Dashboard") + `<div class="app" id="awrap">
     <div class="chips" style="margin-bottom:6px">
       <button class="chip on" id="navDash" onclick="adminTab('dash')">📊 Dashboard</button>
+      <button class="chip" id="navReports" onclick="adminTab('reports')">🧾 Relatórios</button>
       <button class="chip" id="navUsers" onclick="adminTab('users')">👥 Consultores</button>
     </div>
     <div id="adminBody"><div class="center" style="padding:30px"><span class="loader dark"></span></div></div>
@@ -1191,15 +1202,23 @@ async function loadAdminData(){
     sb.from("vw_fazendas_status").select("*"),
     sb.from("vw_kpis_gerais").select("*").maybeSingle(),
   ]);
+  // visitas detalhadas (para a aba Relatórios: seleção e download por visita)
+  const { data:visRows } = await sb.from("visitas")
+    .select("id,inicio_em,tipo_adub,versao,editado_em,consultor_id,fazenda_id,fazendas(display_nome,produtor,fazenda),talhoes(nome,area_ha),consultores(nome)")
+    .order("inicio_em",{ascending:false});
   A.data={vis:vis.data||[], faz:faz.data||[], npk:npk.data||[], obs:obs.data||[],
-    tf:tf.data||[], tc:tc.data||[], th:th.data||[], ade:ade.data||[], st:st.data||[], kpi:kpi.data||{}};
+    tf:tf.data||[], tc:tc.data||[], th:th.data||[], ade:ade.data||[], st:st.data||[], kpi:kpi.data||{},
+    visRows: visRows||[]};
   A.filters={consultor:"",fazenda:"",ini:"",fim:"",adub:""};
 }
 
 function adminTab(t){
   $("#navDash").classList.toggle("on",t==="dash");
   $("#navUsers").classList.toggle("on",t==="users");
-  if(t==="dash") renderDash(); else renderUsers();
+  const nr=$("#navReports"); if(nr) nr.classList.toggle("on",t==="reports");
+  if(t==="dash") renderDash();
+  else if(t==="reports") renderReports();
+  else renderUsers();
 }
 
 /* ---------- filtros ---------- */
@@ -1449,6 +1468,163 @@ function exportDashXLSX(){
   XLSX.writeFile(wb,`${aamm}_Dashboard_SuporteTecnico.xlsx`);
   toast("XLSX exportado","ok");
 }
+/* =====================================================================
+   ADMIN · RELATÓRIOS — selecionar visita(s) com múltiplos filtros e
+   baixar o relatório individual em PDF e XLSX (visão do administrador)
+   ===================================================================== */
+function multiVals(id){ const el=$("#"+id); if(!el||!el.selectedOptions) return [];
+  return [...el.selectedOptions].map(o=>o.value).filter(x=>x!==""); }
+
+function renderReports(){
+  const d=A.data;
+  const consultores=[...new Set((d.visRows||[]).map(v=>v.consultores?.nome).filter(Boolean))].sort();
+  const fazendas   =[...new Set((d.visRows||[]).map(v=>v.fazendas?.display_nome).filter(Boolean))].sort();
+  $("#adminBody").innerHTML=`
+    <div class="section-title">Filtros (seleção múltipla)</div>
+    <div class="card"><div class="filters">
+      <div><label>Consultor(es)</label>
+        <select id="rc" multiple size="4">${consultores.map(c=>`<option>${c}</option>`).join("")}</select></div>
+      <div><label>Fazenda(s)</label>
+        <select id="rf" multiple size="4">${fazendas.map(f=>`<option>${f}</option>`).join("")}</select></div>
+      <div><label>Adubação</label>
+        <select id="ra" multiple size="2"><option value="correcao">Correção</option><option value="manutencao">Manutenção</option></select></div>
+      <div><label>Início</label><input id="ri" type="date"/></div>
+      <div><label>Fim</label><input id="rfim" type="date"/></div>
+      <div><label>Situação</label>
+        <select id="red"><option value="">Todas</option><option value="ed">Somente editadas (v&gt;1)</option><option value="or">Somente originais (v1)</option></select></div>
+    </div>
+    <p class="hint">Segure Ctrl/Cmd (ou toque) para selecionar mais de um item nos campos de múltipla escolha.</p>
+    <div class="spacer"></div>
+    <div class="row">
+      <button class="btn small" onclick="renderReportList()">Aplicar filtros</button>
+      <button class="btn small secondary" onclick="clearReportFilters()">Limpar</button>
+      <button class="btn small secondary" onclick="batchExport('pdf')">⬇️ PDF (selecionadas)</button>
+      <button class="btn small secondary" onclick="batchExport('xlsx')">⬇️ XLSX (selecionadas)</button>
+    </div></div>
+    <div id="reportList"></div>`;
+  ["rc","rf","ra","ri","rfim","red"].forEach(id=>{const el=$("#"+id); if(el) el.onchange=renderReportList;});
+  renderReportList();
+}
+function clearReportFilters(){
+  ["rc","rf","ra"].forEach(id=>{const el=$("#"+id); if(el){ [...el.options].forEach(o=>o.selected=false);} });
+  ["ri","rfim"].forEach(id=>{const el=$("#"+id); if(el) el.value="";});
+  const red=$("#red"); if(red) red.value="";
+  renderReportList();
+}
+function reportFilteredVisits(){
+  const rc=multiVals("rc"), rf=multiVals("rf"), ra=multiVals("ra");
+  const ini=$("#ri")?.value||"", fim=$("#rfim")?.value||"", sit=$("#red")?.value||"";
+  return (A.data.visRows||[]).filter(v=>{
+    const cons=v.consultores?.nome||"", faz=v.fazendas?.display_nome||"", ver=v.versao||1;
+    if(rc.length && !rc.includes(cons)) return false;
+    if(rf.length && !rf.includes(faz)) return false;
+    if(ra.length && !ra.includes(v.tipo_adub)) return false;
+    if(ini && new Date(v.inicio_em) < new Date(ini)) return false;
+    if(fim && new Date(v.inicio_em) > new Date(fim+"T23:59:59")) return false;
+    if(sit==="ed" && !(ver>1)) return false;
+    if(sit==="or" && ver>1) return false;
+    return true;
+  });
+}
+function renderReportList(){
+  const rows=reportFilteredVisits();
+  const list=$("#reportList");
+  if(!rows.length){ list.innerHTML=`<div class="section-title">Visitas</div>
+    <div class="card"><p class="hint">Nenhuma visita corresponde aos filtros.</p></div>`; return; }
+  list.innerHTML=`
+    <div class="section-title">Visitas encontradas (${rows.length})</div>
+    <div class="card tablewrap"><table>
+      <thead><tr><th style="width:34px"><input type="checkbox" id="rselAll" onclick="toggleAllReport(this)"/></th>
+        <th>Data</th><th>Fazenda</th><th>Consultor</th><th>Adub.</th><th>Versão</th><th>Ações</th></tr></thead>
+      <tbody>${rows.map(v=>`
+        <tr>
+          <td><input type="checkbox" class="rsel" value="${v.id}"/></td>
+          <td>${fmtDate(v.inicio_em)}</td>
+          <td>${v.fazendas?.display_nome||"—"}<div class="hint">${v.talhoes?.nome||""}</div></td>
+          <td>${v.consultores?.nome||"—"}</td>
+          <td>${v.tipo_adub||"—"}</td>
+          <td>${(v.versao>1)?`<span class="badge warn" title="Editado em ${fmtDate(v.editado_em)}">v${v.versao}</span>`:`<span class="hint">v1</span>`}</td>
+          <td style="white-space:nowrap">
+            <button class="btn small secondary" onclick="adminVerVisita('${v.id}')">Ver</button>
+            <button class="btn small secondary" onclick="exportVisitaPDF('${v.id}')">PDF</button>
+            <button class="btn small secondary" onclick="exportVisitaXLSX('${v.id}')">XLSX</button>
+          </td>
+        </tr>`).join("")}</tbody>
+    </table></div>`;
+}
+function toggleAllReport(cb){ $$(".rsel").forEach(x=>x.checked=cb.checked); }
+function selectedReportVids(){ return $$(".rsel").filter(x=>x.checked).map(x=>x.value); }
+async function batchExport(kind){
+  const vids=selectedReportVids();
+  if(!vids.length) return toast("Selecione ao menos uma visita na lista","err");
+  toast(`Gerando ${vids.length} arquivo(s) ${kind.toUpperCase()}…`,"ok");
+  for(const vid of vids){
+    if(kind==="pdf") await exportVisitaPDF(vid); else await exportVisitaXLSX(vid);
+    await new Promise(r=>setTimeout(r,350)); // evita bloqueio de múltiplos downloads
+  }
+}
+/* PDF de UMA visita (admin) — todas as seções, sem fotos em memória */
+async function exportVisitaPDF(vid){
+  const D=await carregarVisitaCompleta(vid);
+  const pick={cab:true,obs:true,nut:true,cpd:true,herb:true,chk:true,evi:true,fotos:false};
+  await gerarPDF(D,pick,[]);
+}
+/* XLSX de UMA visita (admin) — abas estruturadas p/ Power Query/BI */
+async function exportVisitaXLSX(vid){
+  const D=await carregarVisitaCompleta(vid); const v=D.v;
+  const wb=XLSX.utils.book_new();
+  const add=(name,rows)=>XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length?rows:[{}]), name);
+  add("Cabecalho",[
+    {Campo:"Fazenda",Valor:v.fazendas.display_nome},
+    {Campo:"Talhao",Valor:(v.talhoes?.nome||"—")+" ("+(v.talhoes?.area_ha??"—")+" ha)"},
+    {Campo:"DataHora",Valor:fmtDate(v.inicio_em)},
+    {Campo:"Consultor",Valor:v.consultores?.nome||"—"},
+    {Campo:"Responsavel",Valor:v.responsavel||"—"},
+    {Campo:"Motivo",Valor:v.motivo||"—"},
+    {Campo:"Tipo_adubacao",Valor:v.tipo_adub||"—"},
+    {Campo:"Versao",Valor:"v"+(v.versao||1)},
+    {Campo:"Editado_em",Valor:v.editado_em?fmtDate(v.editado_em):"—"},
+  ]);
+  add("Observacoes", D.obs.map(o=>({Categoria:o.categoria,Observado:o.observado||"",Acao:o.acao||""})));
+  add("Nutricao", D.nut.map(n=>({Fertilizante:n.fert_nome,Dose_kg_ha:n.dose_kg_ha,
+    N_kg_ha:+n.n_kg_ha,P2O5_kg_ha:+n.p2o5_kg_ha,K2O_kg_ha:+n.k2o_kg_ha})));
+  add("CPD", D.cpd.map(c=>({Defensivo:c.cpd_nome,Dose:c.dose,Unidade:c.unidade})));
+  add("Herbicidas", D.herb.map(h=>({Herbicida:h.herb_nome,Dose:h.dose,Unidade:h.unidade})));
+  add("Adesao", D.chk.map(c=>({Tipo:c.tipo,Recomendacao:c.descricao,Seguiu:c.seguida?"Sim":"Nao"})));
+  add("Evidencias", D.evi.map(e=>({DataHora:fmtDate(e.capturado_em),Latitude:e.latitude,Longitude:e.longitude})));
+  XLSX.writeFile(wb, nomeBaseVisita(v)+".xlsx");
+  toast("XLSX da visita exportado","ok");
+}
+/* Visualização (somente leitura) de uma visita em modal — para o admin */
+async function adminVerVisita(vid){
+  const D=await carregarVisitaCompleta(vid); const v=D.v;
+  const npk=D.nut.reduce((a,n)=>({n:a.n+ +n.n_kg_ha,p:a.p+ +n.p2o5_kg_ha,k:a.k+ +n.k2o_kg_ha}),{n:0,p:0,k:0});
+  const modal=document.createElement("div");
+  modal.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:120;display:flex;align-items:flex-start;justify-content:center;padding:16px;overflow:auto";
+  modal.innerHTML=`<div class="card" style="max-width:820px;width:100%;margin:20px 0">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+      <div><h2 style="margin-bottom:4px">${v.fazendas.display_nome}</h2>
+        <div class="hint">${v.talhoes?.nome||""} · ${fmtDate(v.inicio_em)} · Consultor: ${v.consultores?.nome||""}</div>
+        <div class="hint">Responsável: ${v.responsavel||"—"} · Motivo: ${v.motivo||"—"} · Adubação: <b>${v.tipo_adub||"—"}</b></div>
+        <div class="hint">${(v.versao>1)?`<span class="badge warn">v${v.versao}</span> Editado em ${fmtDate(v.editado_em)}`:`Versão v1 (original)`}</div>
+      </div>
+      <button class="btn small secondary" onclick="this.closest('div[style]').parentNode.remove()">Fechar</button>
+    </div>
+    ${sec("Observações", D.obs.map(o=>`<tr><td>${o.categoria}</td><td>${o.observado||"—"}</td><td>${o.acao||"—"}</td></tr>`).join(""), ["Categoria","Observado","Ação"])}
+    ${sec("Nutrição (NPK kg/ha: N "+npk.n.toFixed(1)+" · P₂O₅ "+npk.p.toFixed(1)+" · K₂O "+npk.k.toFixed(1)+")",
+       D.nut.map(n=>`<tr><td>${n.fert_nome}</td><td>${n.dose_kg_ha}</td><td>${(+n.n_kg_ha).toFixed(1)}/${(+n.p2o5_kg_ha).toFixed(1)}/${(+n.k2o_kg_ha).toFixed(1)}</td></tr>`).join(""), ["Fertilizante","kg/ha","N/P/K"])}
+    ${sec("CPD", D.cpd.map(c=>`<tr><td>${c.cpd_nome}</td><td>${c.dose} ${c.unidade}</td></tr>`).join(""), ["Defensivo","Dose"])}
+    ${sec("Herbicidas", D.herb.map(h=>`<tr><td>${h.herb_nome}</td><td>${h.dose} ${h.unidade}</td></tr>`).join(""), ["Herbicida","Dose"])}
+    ${D.chk.length?sec("Adesão do produtor", D.chk.map(c=>`<tr><td>${c.tipo}</td><td>${c.descricao}</td><td>${c.seguida?"✅":"❌"}</td></tr>`).join(""),["Tipo","Recomendação","Seguiu?"]):""}
+    ${sec("Evidências (metadados)", D.evi.map(e=>`<tr><td>${fmtDate(e.capturado_em)}</td><td>${e.latitude!=null?e.latitude+", "+e.longitude:"sem GPS"}</td></tr>`).join(""),["Data/hora","GPS"])}
+    <div class="row">
+      <button class="btn" onclick="exportVisitaPDF('${vid}')">📄 Baixar PDF</button>
+      <button class="btn secondary" onclick="exportVisitaXLSX('${vid}')">⬇️ Baixar XLSX</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+}
+
 async function exportDashPDF(){
   const { jsPDF }=window.jspdf; const doc=new jsPDF({unit:"pt",format:"a4"});
   const d=A.data; const vis=applyFilters(d.vis); const W=doc.internal.pageSize.getWidth();
