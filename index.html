@@ -487,34 +487,72 @@ function setTab(t){ state.tab=t; const nav=$(".bottomnav");
 /* =====================================================================
    FORMULÁRIO DE VISITA (item 5) + evidências + continuidade
    ===================================================================== */
-async function iniciarVisita(talhao){
+/* Converte ISO -> valor para input datetime-local (fuso local) */
+function toLocalInput(iso){
+  const d=new Date(iso); d.setMinutes(d.getMinutes()-d.getTimezoneOffset());
+  return d.toISOString().slice(0,16);
+}
+/* Renderiza o bloco de continuidade a partir de state.draft.checks (reutilizado em novo/edição) */
+function checksHtml(dateLabel){
+  if(!state.draft.checks.length) return "";
+  return `
+    <div class="section-title">Continuidade${dateLabel?(" — visita de "+dateLabel):""}</div>
+    <div class="card"><p class="hint">Marque o que o produtor seguiu desde a última visita:</p>
+      <div id="checksList">${state.draft.checks.map((r,i)=>`
+        <div class="check"><input type="checkbox" ${r.seguida?"checked":""} onchange="state.draft.checks[${i}].seguida=this.checked"/>
+        <div class="lbl"><span class="badge ${r.tipo==='nutricao'?'ok':r.tipo==='cpd'?'warn':r.tipo==='herb'?'n':'dang'}">${r.tipo}</span>
+        ${r.descricao}</div></div>`).join("")}</div>
+    </div>`;
+}
+
+async function iniciarVisita(talhao, existing=null){
   state.talhao=talhao;
-  // rascunho da visita em memória
-  state.draft = { observacoes:[], nutricao:[], cpd:[], herb:[], fotos:[], checks:[] };
+  state._editVid = existing ? existing.vid : null;
+
+  // rascunho da visita em memória (novo = vazio; edição = dados carregados)
+  state.draft = existing ? existing.draft
+    : { observacoes:[], nutricao:[], cpd:[], herb:[], fotos:[], checks:[] };
+
   const w=$("#cwrap");
-  w.innerHTML=`<div class="center" style="padding:24px"><span class="loader dark"></span> Carregando visita anterior…</div>`;
+  w.innerHTML=`<div class="center" style="padding:24px"><span class="loader dark"></span> ${existing?"Carregando visita…":"Carregando visita anterior…"}</div>`;
 
-  // Continuidade (item 7): recomendações da última visita deste talhão/fazenda
-  const prev = await carregarRecomendacoesAnteriores();
+  // Continuidade (item 7)
+  let prevHtml="";
+  if(existing){
+    prevHtml = checksHtml("");            // usa os checks já carregados da própria visita
+  } else {
+    const prev = await carregarRecomendacoesAnteriores();  // recomendações da última visita
+    prevHtml = prev.html;
+  }
 
-  const now = new Date(); now.setMinutes(now.getMinutes()-now.getTimezoneOffset());
-  const dtLocal = now.toISOString().slice(0,16);
+  let dtLocal;
+  if(existing){ dtLocal = existing.inicio; }
+  else { const now = new Date(); now.setMinutes(now.getMinutes()-now.getTimezoneOffset()); dtLocal = now.toISOString().slice(0,16); }
+
+  const titulo   = existing ? "Editar visita" : "Nova visita";
+  const respVal  = existing ? (existing.resp||"")   : "";
+  const motivoVal= existing ? (existing.motivo||"") : "";
+  const oNutri   = existing ? (existing.obsNutri||""): "";
+  const oCpd     = existing ? (existing.obsCpd||"")  : "";
+  const oHerb    = existing ? (existing.obsHerb||"") : "";
+  const btnLabel = existing ? "💾 Salvar alterações" : "💾 Salvar visita";
 
   w.innerHTML = `
-    <button class="btn ghost small" onclick="selFazenda(state.fazenda)">← Talhões</button>
+    <button class="btn ghost small" onclick="${existing?'viewHistoricoPick()':'selFazenda(state.fazenda)'}">← ${existing?'Histórico':'Talhões'}</button>
     <div class="card">
-      <h2>Nova visita</h2>
+      <h2>${titulo}</h2>
       <div class="hint">${state.fazenda.display_nome} · ${talhao.nome} (${talhao.area_ha} ha)</div>
+      ${existing?'<div class="hint"><span class="badge warn">edição</span> Ao salvar, os blocos desta visita serão atualizados.</div>':''}
     </div>
 
     <div class="section-title">Dados da visita</div>
     <div class="card">
       <label>Data e hora de início</label><input id="v_inicio" type="datetime-local" value="${dtLocal}"/>
-      <label>Responsável por acompanhar</label><input id="v_resp" placeholder="Nome de quem acompanhou"/>
-      <label>Motivo da visita</label><input id="v_motivo" placeholder="Ex.: acompanhamento de florada"/>
+      <label>Responsável por acompanhar</label><input id="v_resp" placeholder="Nome de quem acompanhou" value="${respVal.replace(/"/g,'&quot;')}"/>
+      <label>Motivo da visita</label><input id="v_motivo" placeholder="Ex.: acompanhamento de florada" value="${motivoVal.replace(/"/g,'&quot;')}"/>
     </div>
 
-    ${prev.html}
+    ${prevHtml}
 
     <div class="section-title">Observações da visita</div>
     <div class="card" id="obsCard">
@@ -537,7 +575,7 @@ async function iniciarVisita(talhao){
           <option value="custom">✏️ Componha seu NPK / Outros</option>
           ${state.catalogos.fert.map(f=>`<option value="${f.id}">${f.nome}</option>`).join("")}</select>
         <div class="npk-summary" id="npkSummary"></div>
-        <label>Observações da nutrição</label><textarea id="obs_nutri" rows="2"></textarea>
+        <label>Observações da nutrição</label><textarea id="obs_nutri" rows="2">${oNutri}</textarea>
       </div>
 
       <div class="subblock">
@@ -545,7 +583,7 @@ async function iniciarVisita(talhao){
         <div id="cpdList"></div>
         <select id="cpdSel"><option value="">+ Adicionar defensivo…</option>
           ${state.catalogos.cpd.map(c=>`<option value="${c.id}">${c.molecula}</option>`).join("")}</select>
-        <label>Observações CPD</label><textarea id="obs_cpd" rows="2"></textarea>
+        <label>Observações CPD</label><textarea id="obs_cpd" rows="2">${oCpd}</textarea>
       </div>
 
       <div class="subblock">
@@ -553,7 +591,7 @@ async function iniciarVisita(talhao){
         <div id="herbList"></div>
         <select id="herbSel"><option value="">+ Adicionar herbicida…</option>
           ${state.catalogos.herb.map(h=>`<option value="${h.id}">${h.molecula}</option>`).join("")}</select>
-        <label>Observações herbicidas</label><textarea id="obs_herb" rows="2"></textarea>
+        <label>Observações herbicidas</label><textarea id="obs_herb" rows="2">${oHerb}</textarea>
       </div>
     </div>
 
@@ -568,12 +606,25 @@ async function iniciarVisita(talhao){
     </div>
 
     <div class="spacer"></div>
-    <button class="btn" id="btnSalvarVisita">💾 Salvar visita</button>
+    <button class="btn" id="btnSalvarVisita">${btnLabel}</button>
     <div class="spacer"></div>
     <div class="spacer"></div>
   `;
 
-  buildObsChips(); renderNutri(); renderCPD(); renderHerb(); renderPhotos();
+  buildObsChips();
+  if(existing){
+    // adubação selecionada
+    const ab=document.querySelector(`[data-adub="${_adub}"]`); if(ab) ab.classList.add("on");
+    // observações: marca chips e sincroniza campos a partir do draft
+    const cats = state.draft.observacoes.map(o=>o.categoria);
+    if(cats.length===1 && cats[0]===OBS_EXCLUSIVA){
+      const c=$(`#obsChips .chip[data-obs="${OBS_EXCLUSIVA}"]`); if(c) c.classList.add("on");
+    } else {
+      cats.forEach(cat=>{ const c=$(`#obsChips .chip[data-obs="${cat}"]`); if(c) c.classList.add("on"); });
+      syncObsDetails();
+    }
+  }
+  renderNutri(); renderCPD(); renderHerb(); renderPhotos();
   $("#nutriSel").onchange=e=>{ const v=e.target.value; if(!v) return;
     if(v==='custom') addCustomNutri(); else addNutri(+v); e.target.value=""; };
   $("#cpdSel").onchange  =e=>{ if(e.target.value){ addCPD(+e.target.value);  e.target.value=""; } };
@@ -729,13 +780,18 @@ async function onPhotos(e){
   renderPhotos();
 }
 function renderPhotos(){
-  $("#photoGrid").innerHTML = state.draft.fotos.map((p,i)=>`
-    <div class="photo"><img src="${p.url}"/>
+  $("#photoGrid").innerHTML = state.draft.fotos.map((p,i)=>{
+    const media = p.url
+      ? `<img src="${p.url}"/>`
+      : `<div style="aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;background:#eef2f7;color:var(--muted);font-size:.78rem;text-align:center;padding:8px">Evidência registrada<br/>(imagem no dispositivo)</div>`;
+    return `
+    <div class="photo">${media}
       <div class="meta">📅 ${fmtDate(p.capturado_em)}<br/>
-      📍 ${p.lat!=null?p.lat.toFixed(5)+", "+p.lon.toFixed(5):"sem GPS"}</div>
+      📍 ${p.lat!=null?Number(p.lat).toFixed(5)+", "+Number(p.lon).toFixed(5):"sem GPS"}</div>
       <button class="btn small danger" style="width:100%;border-radius:0"
         onclick="state.draft.fotos.splice(${i},1);renderPhotos()">Remover</button>
-    </div>`).join("");
+    </div>`;
+  }).join("");
 }
 
 /* ---------- Continuidade entre visitas (item 7) ---------- */
@@ -769,26 +825,51 @@ async function carregarRecomendacoesAnteriores(){
   return {html};
 }
 
-/* ---------- SALVAR (persistência no Supabase) ---------- */
+/* ---------- SALVAR (persistência no Supabase) — cria OU edita ---------- */
 async function salvarVisita(){
   await guard(async()=>{
     if(!_adub) return toast("Selecione o tipo de adubação (correção/manutenção)","err");
     const inicio=$("#v_inicio").value;
     if(!inicio) return toast("Informe a data/hora de início","err");
+    const isEdit = !!state._editVid;
+    const restoreLabel = isEdit ? "💾 Salvar alterações" : "💾 Salvar visita";
     const b=$("#btnSalvarVisita"); b.innerHTML='<span class="loader"></span> Salvando…'; b.disabled=true;
 
-    // 1) cabeçalho da visita
-    const { data:vis, error:e1 } = await sb.from("visitas").insert({
-      fazenda_id:state.fazenda.id, talhao_id:state.talhao.id, consultor_id:state.user.id,
+    const header = {
       inicio_em:new Date(inicio).toISOString(),
       responsavel:$("#v_resp").value||null, motivo:$("#v_motivo").value||null,
       tipo_adub:_adub, obs_nutricao:$("#obs_nutri").value||null,
       obs_cpd:$("#obs_cpd").value||null, obs_herb:$("#obs_herb").value||null
-    }).select().single();
-    if(e1){ b.disabled=false; b.textContent="💾 Salvar visita"; return toast(e1.message,"err"); }
-    const vid=vis.id;
+    };
 
-    // 2) blocos filhos
+    let vid;
+    if(isEdit){
+      // 1) atualiza o cabeçalho da visita existente
+      vid = state._editVid;
+      const { error:eu } = await sb.from("visitas").update(header).eq("id",vid);
+      if(eu){ b.disabled=false; b.textContent=restoreLabel; return toast("Falha ao atualizar a visita: "+eu.message,"err"); }
+      // 2) apaga os blocos filhos para reinserir o estado atual
+      const del = await Promise.all([
+        sb.from("visita_observacoes").delete().eq("visita_id",vid),
+        sb.from("visita_nutricao").delete().eq("visita_id",vid),
+        sb.from("visita_cpd").delete().eq("visita_id",vid),
+        sb.from("visita_herb").delete().eq("visita_id",vid),
+        sb.from("visita_recomendacoes_check").delete().eq("visita_id",vid),
+        sb.from("evidencias_meta").delete().eq("visita_id",vid),
+      ]);
+      const derr = del.find(r=>r.error);
+      if(derr){ b.disabled=false; b.textContent=restoreLabel;
+        return toast("Sem permissão para editar (rode o SQL de edição): "+derr.error.message,"err"); }
+    } else {
+      // 1) cria o cabeçalho da visita
+      const { data:vis, error:e1 } = await sb.from("visitas").insert({
+        fazenda_id:state.fazenda.id, talhao_id:state.talhao.id, consultor_id:state.user.id, ...header
+      }).select().single();
+      if(e1){ b.disabled=false; b.textContent=restoreLabel; return toast(e1.message,"err"); }
+      vid=vis.id;
+    }
+
+    // 2) blocos filhos (comum a criação e edição)
     const obs=collectObs();
     const jobs=[];
     if(obs.length) jobs.push(sb.from("visita_observacoes").insert(obs.map(o=>({...o,visita_id:vid}))));
@@ -813,23 +894,24 @@ async function salvarVisita(){
         tipo:r.tipo, descricao:r.descricao, seguida:r.seguida}))));
     if(state.draft.fotos.length) jobs.push(sb.from("evidencias_meta").insert(
       state.draft.fotos.map(p=>({visita_id:vid, capturado_em:p.capturado_em,
-        latitude:p.lat, longitude:p.lon, ref_local:p.file.name}))));
+        latitude:p.lat, longitude:p.lon, ref_local: p.file ? p.file.name : (p.ref_local||null)}))));
     const results=await Promise.all(jobs);
     const err=results.find(r=>r.error);
-    if(err){ toast("Visita salva, mas houve erro em um bloco: "+err.error.message,"err"); }
-    else toast("Visita salva com sucesso!","ok");
+    if(err){ toast((isEdit?"Alterações salvas":"Visita salva")+", mas houve erro em um bloco: "+err.error.message,"err"); }
+    else toast(isEdit?"Visita atualizada com sucesso!":"Visita salva com sucesso!","ok");
 
     // guarda referência p/ oferecer exportação
     state._lastVisitId=vid;
-    telaPosSalvar(vid);
+    state._editVid=null;            // encerra o modo de edição
+    telaPosSalvar(vid, isEdit);
   });
 }
 
-function telaPosSalvar(vid){
+function telaPosSalvar(vid, edited=false){
   const w=$("#cwrap");
   w.innerHTML=`<div class="card center">
     <div style="font-size:2rem">✅</div>
-    <h2>Visita registrada</h2>
+    <h2>${edited?"Visita atualizada":"Visita registrada"}</h2>
     <p class="hint">${state.fazenda.display_nome} · ${state.talhao.nome}</p>
     <div class="spacer"></div>
     <button class="btn" onclick='exportarPDFVisita("${vid}")'>📄 Exportar PDF (selecionar seções)</button>
@@ -847,7 +929,7 @@ async function viewHistoricoPick(){
   w.innerHTML=`<div class="section-title">Histórico de visitas</div>
     <div class="center" style="padding:20px"><span class="loader dark"></span></div>`;
   const { data:vis } = await sb.from("visitas")
-    .select("id,inicio_em,motivo,tipo_adub,fazenda_id,talhao_id,fazendas(display_nome),talhoes(nome)")
+    .select("id,inicio_em,motivo,tipo_adub,consultor_id,fazenda_id,talhao_id,fazendas(display_nome),talhoes(nome)")
     .order("inicio_em",{ascending:false});
   if(!vis||!vis.length){ w.innerHTML=`<div class="section-title">Histórico</div>
     <div class="card"><p class="hint">Nenhuma visita registrada ainda.</p></div>`; return; }
@@ -857,6 +939,7 @@ async function viewHistoricoPick(){
         <div class="title">${v.fazendas?.display_nome||""}</div>
         <div class="sub">${v.talhoes?.nome||""} · ${fmtDate(v.inicio_em)} · <span class="badge ok">${v.tipo_adub||"-"}</span></div>
       </div>
+      ${v.consultor_id===state.user.id?`<button class="btn small secondary" onclick="editarVisita('${v.id}')">Editar</button>`:''}
       <button class="btn small secondary" onclick="verVisita('${v.id}')">Ver</button>
       <button class="btn small" onclick='exportarPDFVisita("${v.id}")'>PDF</button>
       </div>`).join("")}</div>`;
@@ -876,6 +959,49 @@ async function carregarVisitaCompleta(vid){
           herb:herb.data||[], chk:chk.data||[], evi:evi.data||[]};
 }
 
+/* ---------- EDITAR VISITA: carrega os dados e abre o formulário em modo edição ---------- */
+async function editarVisita(vid){
+  await guard(async()=>{
+    const w=$("#cwrap"); w.innerHTML=`<div class="center" style="padding:24px"><span class="loader dark"></span> Carregando visita…</div>`;
+    const D=await carregarVisitaCompleta(vid); const v=D.v;
+    if(!v) return toast("Visita não encontrada","err");
+    if(v.consultor_id!==state.user.id) return toast("Você só pode editar as suas visitas","err");
+
+    // contexto (fazenda/talhão) e tipo de adubação
+    state.fazenda = v.fazendas;
+    const talhao  = v.talhoes || {id:v.talhao_id, nome:"—", area_ha:"—"};
+    _adub = v.tipo_adub || null;
+
+    // monta o rascunho a partir dos dados salvos
+    const draft = { observacoes:[], nutricao:[], cpd:[], herb:[], fotos:[], checks:[] };
+    draft.observacoes = D.obs.map(o=>({categoria:o.categoria, observado:o.observado, acao:o.acao}));
+    draft.nutricao = D.nut.map(n=>{
+      const dose = Number(n.dose_kg_ha)||0;
+      const fcat = (n.fert_id!=null) ? state.catalogos.fert.find(x=>x.id===n.fert_id) : null;
+      if(fcat){ return {fert_id:fcat.id, fert_nome:fcat.nome, dose, custom:false, cn:0,cp:0,ck:0, f:fcat}; }
+      // personalizado (ou fertilizante fora do catálogo): deriva os teores a partir dos kg/ha salvos
+      const cn = dose>0 ? +(Number(n.n_kg_ha)/dose*100).toFixed(2) : 0;
+      const cp = dose>0 ? +(Number(n.p2o5_kg_ha)/dose*100).toFixed(2) : 0;
+      const ck = dose>0 ? +(Number(n.k2o_kg_ha)/dose*100).toFixed(2) : 0;
+      return {fert_id:null, fert_nome:"Componha seu NPK / Outros", dose, custom:true, cn,cp,ck, f:{n:0,p2o5:0,k2o:0}};
+    });
+    draft.cpd  = D.cpd.map(c=>({cpd_id:c.cpd_id, cpd_nome:c.cpd_nome, dose:Number(c.dose)||0, unidade:c.unidade||"L/ha"}));
+    draft.herb = D.herb.map(h=>({herb_id:h.herb_id, herb_nome:h.herb_nome, dose:Number(h.dose)||0, unidade:h.unidade||"L/ha"}));
+    draft.checks = D.chk.map(c=>({tipo:c.tipo, descricao:c.descricao, seguida:!!c.seguida}));
+    draft._origem = (D.chk[0] && D.chk[0].origem_visita_id) || null;
+    draft.fotos = D.evi.map(e=>({existing:true, capturado_em:e.capturado_em,
+      lat:(e.latitude!=null?Number(e.latitude):null), lon:(e.longitude!=null?Number(e.longitude):null), ref_local:e.ref_local}));
+
+    const existing = {
+      vid, draft,
+      inicio: toLocalInput(v.inicio_em),
+      resp: v.responsavel, motivo: v.motivo,
+      obsNutri: v.obs_nutricao||"", obsCpd: v.obs_cpd||"", obsHerb: v.obs_herb||""
+    };
+    await iniciarVisita(talhao, existing);
+  });
+}
+
 async function verVisita(vid){
   const w=$("#cwrap"); w.innerHTML=`<div class="center" style="padding:24px"><span class="loader dark"></span></div>`;
   const D=await carregarVisitaCompleta(vid); const v=D.v;
@@ -893,6 +1019,7 @@ async function verVisita(vid){
     ${sec("Herbicidas", D.herb.map(h=>`<tr><td>${h.herb_nome}</td><td>${h.dose} ${h.unidade}</td></tr>`).join(""), ["Herbicida","Dose"])}
     ${D.chk.length?sec("Adesão do produtor", D.chk.map(c=>`<tr><td>${c.tipo}</td><td>${c.descricao}</td><td>${c.seguida?"✅":"❌"}</td></tr>`).join(""),["Tipo","Recomendação","Seguiu?"]):""}
     ${sec("Evidências (metadados)", D.evi.map(e=>`<tr><td>${fmtDate(e.capturado_em)}</td><td>${e.latitude!=null?e.latitude+", "+e.longitude:"sem GPS"}</td></tr>`).join(""),["Data/hora","GPS"])}
+    ${v.consultor_id===state.user.id?`<button class="btn secondary" onclick="editarVisita('${vid}')" style="margin-bottom:8px">✏️ Editar visita</button>`:''}
     <button class="btn" onclick='exportarPDFVisita("${vid}")'>📄 Exportar PDF</button>
     <div class="spacer"></div><div class="spacer"></div>
   `;
