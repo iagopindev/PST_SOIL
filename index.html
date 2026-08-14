@@ -199,6 +199,85 @@ function fileToDataURL(file){
   return new Promise((res,rej)=>{ const r=new FileReader();
     r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(file); });
 }
+/* =====================================================================
+   ARMAZENAMENTO DE FOTOS NO SUPABASE STORAGE (bucket privado "evidencias")
+   - Máximo de 4 fotos por relatório (regra de negócio).
+   - Compressão client-side ~1024px / qualidade JPEG 0,6 (leve, cabe mais).
+   - O caminho do arquivo é gravado em evidencias_meta.storage_path.
+   - Acesso via signed URL (bucket privado; nunca público).
+   ===================================================================== */
+const STORAGE_BUCKET="evidencias";
+const MAX_FOTOS=4;
+/* Reamostra a imagem e devolve um Blob JPEG (para upload) */
+function shrinkImageToBlob(dataUrl,maxW=1024,quality=0.6){
+  return new Promise(res=>{ const img=new Image();
+    img.onload=()=>{ const scale=Math.min(1,maxW/img.width);
+      const c=document.createElement("canvas");
+      c.width=Math.round(img.width*scale); c.height=Math.round(img.height*scale);
+      c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+      c.toBlob(b=>res(b),"image/jpeg",quality); };
+    img.onerror=()=>res(null); img.src=dataUrl; });
+}
+/* Baixa uma URL (signed) e converte para dataURL — para embutir no PDF */
+async function fetchAsDataURL(url){
+  try{ const r=await fetch(url); const b=await r.blob();
+    return await new Promise((res,rej)=>{ const fr=new FileReader();
+      fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(b); });
+  }catch(e){ console.warn("fetchAsDataURL:",e); return null; }
+}
+/* Resolve a imagem de uma foto (nova em memória, dataURL, ou path no Storage) */
+async function resolveFotoDataURL(p){
+  if(p.dataUrl) return p.dataUrl;
+  if(p.file)    return await fileToDataURL(p.file);
+  if(p.storage_path){
+    const { data } = await sb.storage.from(STORAGE_BUCKET).createSignedUrl(p.storage_path,120);
+    if(data?.signedUrl) return await fetchAsDataURL(data.signedUrl);
+  }
+  return null;
+}
+/* Gera signed URLs (preview) para uma lista de paths do Storage */
+async function signedUrls(paths,expira=3600){
+  if(!paths.length) return {};
+  const { data } = await sb.storage.from(STORAGE_BUCKET).createSignedUrls(paths,expira);
+  const map={}; (data||[]).forEach(d=>{ if(d.path && d.signedUrl) map[d.path]=d.signedUrl; });
+  return map;
+}
+/* Sobe as fotos do rascunho ao Storage e devolve metadados (com storage_path).
+   - Mantém fotos já existentes (com storage_path e sem novo File).
+   - Envia as novas comprimidas em q0.6/~1024px.
+   - Remove do bucket os arquivos órfãos (fotos apagadas no formulário). */
+async function uploadFotosSupabase(vid){
+  const metas=[]; const finalPaths=[];
+  const fotos=(state.draft.fotos||[]).slice(0,MAX_FOTOS); // trava dura de 4
+  for(let i=0;i<fotos.length;i++){
+    const p=fotos[i];
+    if(p.storage_path && !p.file){ // foto já existente mantida
+      finalPaths.push(p.storage_path);
+      metas.push({storage_path:p.storage_path, capturado_em:p.capturado_em, lat:p.lat, lon:p.lon});
+      continue;
+    }
+    let dataUrl=p.dataUrl||null;
+    if(!dataUrl && p.file){ dataUrl=await fileToDataURL(p.file); }
+    if(!dataUrl) continue;
+    const blob=await shrinkImageToBlob(dataUrl,1024,0.6);
+    if(!blob) continue;
+    const path=`${vid}/${i}_${Date.now()}.jpg`;
+    const { error }=await sb.storage.from(STORAGE_BUCKET)
+      .upload(path,blob,{contentType:"image/jpeg",upsert:true});
+    if(error){ toast("Falha no upload de uma foto: "+error.message,"err"); continue; }
+    finalPaths.push(path);
+    metas.push({storage_path:path, capturado_em:p.capturado_em, lat:p.lat, lon:p.lon});
+  }
+  // limpeza de órfãos no bucket (fotos removidas / substituídas)
+  try{
+    const { data:list }=await sb.storage.from(STORAGE_BUCKET).list(String(vid),{limit:100});
+    if(list && list.length){
+      const orphans=list.map(o=>`${vid}/${o.name}`).filter(pth=>!finalPaths.includes(pth));
+      if(orphans.length) await sb.storage.from(STORAGE_BUCKET).remove(orphans);
+    }
+  }catch(e){ console.warn("Limpeza de órfãos no Storage:",e); }
+  return metas;
+}
 /* Redimensiona a imagem (largura máx) e devolve dataURL + dimensões, para caber no PDF */
 function shrinkImage(dataUrl,maxW=1000,quality=0.72){
   return new Promise(res=>{ const img=new Image();
@@ -598,10 +677,10 @@ async function iniciarVisita(talhao, existing=null){
 
     <div class="section-title">Evidências fotográficas</div>
     <div class="card">
-      <p class="hint">📍 As fotos <b>não</b> são enviadas ao Supabase — ficam no seu dispositivo.
-      Salvamos apenas <b>data/hora/GPS</b> no banco e você pode <b>exportar as fotos</b> ao final.</p>
+      <p class="hint">📍 Até <b>4 fotos</b> por relatório. As imagens são <b>comprimidas</b> (~1024px)
+      e enviadas ao <b>Supabase Storage</b> (bucket privado) ao salvar. Também registramos <b>data/hora/GPS</b>.</p>
       <input id="photoInput" type="file" accept="image/*" capture="environment" multiple style="display:none"/>
-      <button class="btn secondary" onclick="$('#photoInput').click()">📷 Adicionar foto(s)</button>
+      <button class="btn secondary" onclick="$('#photoInput').click()">📷 Adicionar foto(s) <span id="fotoCount" class="hint"></span></button>
       <div class="spacer"></div>
       <div class="photogrid" id="photoGrid"></div>
     </div>
@@ -773,6 +852,9 @@ async function getGPS(){
 async function onPhotos(e){
   const files=[...e.target.files]; e.target.value="";
   for(const file of files){
+    if(state.draft.fotos.length>=MAX_FOTOS){
+      toast(`Limite de ${MAX_FOTOS} fotos por relatório atingido`,"err"); break;
+    }
     const gps=await getGPS();
     const url=URL.createObjectURL(file);
     state.draft.fotos.push({file, url, capturado_em:new Date().toISOString(),
@@ -793,6 +875,7 @@ function renderPhotos(){
         onclick="state.draft.fotos.splice(${i},1);renderPhotos()">Remover</button>
     </div>`;
   }).join("");
+  const cnt=$("#fotoCount"); if(cnt) cnt.textContent=`(${state.draft.fotos.length}/${MAX_FOTOS})`;
 }
 
 /* ---------- Continuidade entre visitas (item 7) ---------- */
@@ -896,9 +979,11 @@ async function salvarVisita(){
     if(state.draft.checks.length) jobs.push(sb.from("visita_recomendacoes_check").insert(
       state.draft.checks.map(r=>({visita_id:vid, origem_visita_id:state.draft._origem||null,
         tipo:r.tipo, descricao:r.descricao, seguida:r.seguida}))));
-    if(state.draft.fotos.length) jobs.push(sb.from("evidencias_meta").insert(
-      state.draft.fotos.map(p=>({visita_id:vid, capturado_em:p.capturado_em,
-        latitude:p.lat, longitude:p.lon, ref_local: p.file ? p.file.name : (p.ref_local||null)}))));
+    // Sobe as fotos (≤4, comprimidas q0.6) ao Supabase Storage e obtém os paths
+    const fotoMetas = await uploadFotosSupabase(vid);
+    if(fotoMetas.length) jobs.push(sb.from("evidencias_meta").insert(
+      fotoMetas.map(m=>({visita_id:vid, capturado_em:m.capturado_em,
+        latitude:m.lat, longitude:m.lon, storage_path:m.storage_path}))));
     const results=await Promise.all(jobs);
     const err=results.find(r=>r.error);
     if(err){ toast((isEdit?"Alterações salvas":"Visita salva")+", mas houve erro em um bloco: "+err.error.message,"err"); }
@@ -993,8 +1078,17 @@ async function editarVisita(vid){
     draft.herb = D.herb.map(h=>({herb_id:h.herb_id, herb_nome:h.herb_nome, dose:Number(h.dose)||0, unidade:h.unidade||"L/ha"}));
     draft.checks = D.chk.map(c=>({tipo:c.tipo, descricao:c.descricao, seguida:!!c.seguida}));
     draft._origem = (D.chk[0] && D.chk[0].origem_visita_id) || null;
-    draft.fotos = D.evi.map(e=>({existing:true, capturado_em:e.capturado_em,
-      lat:(e.latitude!=null?Number(e.latitude):null), lon:(e.longitude!=null?Number(e.longitude):null), ref_local:e.ref_local}));
+    // Fotos: reconstrói do Supabase Storage. Gera signed URLs para preview e
+    // mantém o storage_path para preservar as imagens já existentes ao salvar.
+    const evPaths=D.evi.map(e=>e.storage_path).filter(Boolean);
+    let urlMap={}; try{ urlMap=await signedUrls(evPaths,3600); }catch(e){}
+    draft.fotos = D.evi.map(e=>({
+      existing:true, storage_path:e.storage_path||null,
+      url:(e.storage_path?urlMap[e.storage_path]:null)||null,
+      capturado_em:e.capturado_em,
+      lat:(e.latitude!=null?Number(e.latitude):null),
+      lon:(e.longitude!=null?Number(e.longitude):null)
+    }));
 
     const existing = {
       vid, draft, versao: v.versao||1,
@@ -1041,8 +1135,12 @@ function sec(title,rows,cols){
    ===================================================================== */
 async function exportarPDFVisita(vid){
   const D=await carregarVisitaCompleta(vid); const v=D.v;
-  // Fotos disponíveis apenas em memória (não vão ao Supabase): usáveis logo após salvar a visita
-  const fotos = (state.draft && state._lastVisitId===vid) ? (state.draft.fotos||[]) : [];
+  // Fotos: obtidas do Supabase Storage a partir dos metadados (storage_path).
+  // Fallback: rascunho recém-salvo na mesma sessão (ainda em memória).
+  let fotos=(D.evi||[]).filter(e=>e.storage_path).map(e=>({storage_path:e.storage_path,
+    capturado_em:e.capturado_em, lat:(e.latitude!=null?Number(e.latitude):null),
+    lon:(e.longitude!=null?Number(e.longitude):null)}));
+  if(!fotos.length && state.draft && state._lastVisitId===vid){ fotos = state.draft.fotos||[]; }
   // modal de seleção de seções
   const modal=document.createElement("div");
   modal.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:120;display:flex;align-items:center;justify-content:center;padding:16px";
@@ -1125,7 +1223,7 @@ async function gerarPDF(D,pick,fotos=[]){
   if(pick.evi) t(["Data/hora da foto","Latitude","Longitude"],
     D.evi.map(e=>[fmtDate(e.capturado_em),e.latitude??"—",e.longitude??"—"]));
 
-  // ---- FOTOS embutidas no PDF (base64 em memória, SEM passar pelo Supabase) ----
+  // ---- FOTOS embutidas no PDF (baixadas do Supabase Storage via signed URL) ----
   if(pick.fotos && fotos && fotos.length){
     const pageH=doc.internal.pageSize.getHeight();
     const marginX=40, gap=12, colW=(W-marginX*2-gap)/2; // 2 colunas
@@ -1135,8 +1233,7 @@ async function gerarPDF(D,pick,fotos=[]){
     let col=0, rowY=y, rowMaxH=0;
     for(let i=0;i<fotos.length;i++){
       const p=fotos[i];
-      let dataUrl = p.dataUrl || null;
-      if(!dataUrl && p.file){ dataUrl = await fileToDataURL(p.file); }
+      const dataUrl = await resolveFotoDataURL(p);
       const small = dataUrl ? await shrinkImage(dataUrl, 900, 0.7) : null;
       if(!small) continue;
       const imgW=colW, imgH=colW*(small.h/small.w);
@@ -1566,8 +1663,11 @@ async function batchExport(kind){
 /* PDF de UMA visita (admin) — todas as seções, sem fotos em memória */
 async function exportVisitaPDF(vid){
   const D=await carregarVisitaCompleta(vid);
-  const pick={cab:true,obs:true,nut:true,cpd:true,herb:true,chk:true,evi:true,fotos:false};
-  await gerarPDF(D,pick,[]);
+  const fotos=(D.evi||[]).filter(e=>e.storage_path).map(e=>({storage_path:e.storage_path,
+    capturado_em:e.capturado_em, lat:(e.latitude!=null?Number(e.latitude):null),
+    lon:(e.longitude!=null?Number(e.longitude):null)}));
+  const pick={cab:true,obs:true,nut:true,cpd:true,herb:true,chk:true,evi:true,fotos:fotos.length>0};
+  await gerarPDF(D,pick,fotos);
 }
 /* XLSX de UMA visita (admin) — abas estruturadas p/ Power Query/BI */
 async function exportVisitaXLSX(vid){
