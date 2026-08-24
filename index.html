@@ -1424,7 +1424,7 @@ async function exportarPDFVisita(vid){
   const modal=document.createElement("div");
   modal.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:120;display:flex;align-items:center;justify-content:center;padding:16px";
   const secs=[["cab","Cabeçalho / dados",true],["obs","Observações",true],["nut","Nutrição + NPK",true],
-    ["cpd","CPD",true],["herb","Herbicidas",true],["chk","Adesão do produtor",true],["evi","Evidências (metadados)",true]];
+    ["cpd","CPD",true],["herb","Herbicidas",true],["chk","Adesão do produtor",true]];
   if(fotos.length) secs.push(["fotos",`Fotos no PDF (${fotos.length})`,true]);
   modal.innerHTML=`<div class="card" style="max-width:420px;width:100%">
     <h2>Exportar PDF</h2><p class="hint">Selecione as seções que deseja incluir:</p>
@@ -1495,17 +1495,33 @@ async function gerarPDF(D,pick,fotos=[]){
       styles:{fontSize:8,cellPadding:4,textColor:[15,39,64]},
       alternateRowStyles:{fillColor:[248,250,253]}, margin:{left:40,right:40}});
     y=doc.lastAutoTable.finalY+16; };
+  // Variante DESTACADA (cabeçalho azul-escuro + borda de realce) — usada para a RECOMENDAÇÃO
+  const tHi=(head,body)=>{ if(!body.length) return;
+    doc.autoTable({startY:y, head:[head], body, theme:"grid",
+      headStyles:{fillColor:[27,58,91],textColor:[255,255,255],fontStyle:"bold"},
+      styles:{fontSize:8,cellPadding:4,textColor:[15,39,64],lineColor:[27,58,91],lineWidth:0.4},
+      alternateRowStyles:{fillColor:[240,245,251]}, margin:{left:40,right:40}});
+    y=doc.lastAutoTable.finalY+16; };
+  // Faixa/título de seção destacada
+  const banner=(txt)=>{ const pageH=doc.internal.pageSize.getHeight();
+    if(y > pageH-60){ doc.addPage(); y=48; }
+    doc.setFillColor(27,58,91); doc.rect(40,y-9,W-80,22,"F");
+    doc.setFontSize(10); doc.setTextColor(255,255,255); doc.setFont(undefined,"bold");
+    doc.text(txt,48,y+5); doc.setFont(undefined,"normal");
+    doc.setTextColor(15,39,64); y+=26; };
 
   if(pick.obs) t(["Observação","O que foi observado","Ação a adotar"],
     D.obs.map(o=>[o.categoria,o.observado||"—",o.acao||"—"]));
   if(pick.nut && D.nut.length){
+    // RECOMENDAÇÃO TÉCNICA (aba Manejo da Lavoura) — destacada no PDF
+    banner("RECOMENDAÇÃO TÉCNICA — Manejo da Lavoura (NPK recomendado)");
     // agrupa a nutrição por tipo de adubação (Correção / Manutenção) — uma tabela por tipo
     const groups={};
     D.nut.forEach(n=>{ const k=n.tipo_adub||v.tipo_adub||"—"; (groups[k]=groups[k]||[]).push(n); });
     Object.keys(groups).forEach(k=>{
       const rows=groups[k];
       const npk=rows.reduce((a,n)=>({n:a.n+ +n.n_kg_ha,p:a.p+ +n.p2o5_kg_ha,k:a.k+ +n.k2o_kg_ha}),{n:0,p:0,k:0});
-      t([`Fertilizante — ${adubLabel(k)}`,"Dose (kg/ha)","N","P₂O₅","K₂O"],
+      tHi([`Fertilizante recomendado — ${adubLabel(k)}`,"Dose (kg/ha)","N","P₂O₅","K₂O"],
         rows.map(n=>[n.fert_nome,n.dose_kg_ha,(+n.n_kg_ha).toFixed(1),(+n.p2o5_kg_ha).toFixed(1),(+n.k2o_kg_ha).toFixed(1)])
           .concat([["TOTAL","",npk.n.toFixed(1),npk.p.toFixed(1),npk.k.toFixed(1)]]));
     });
@@ -1519,13 +1535,13 @@ async function gerarPDF(D,pick,fotos=[]){
         !c.seguida?"Não seguiu":(c.substituicao?"Desvio (substituição)":"Seguiu")]));
     const ap=npkAplicadoDeChecks(D.chk);
     if(ap.n||ap.p||ap.k){
-      t([`Fertilizante aplicado (NPK aplicado: N ${ap.n.toFixed(1)} · P₂O₅ ${ap.p.toFixed(1)} · K₂O ${ap.k.toFixed(1)})`,"Dose (kg/ha)","N","P₂O₅","K₂O"],
+      t(["Fertilizantes aplicados","Dose (kg/ha)","N","P₂O₅","K₂O"],
         D.chk.filter(c=>c.tipo==='nutricao'&&c.seguida).map(c=>[c.aplicado_nome||"—",c.aplicado_dose??"—",
-          (+c.aplicado_n_kg_ha||0).toFixed(1),(+c.aplicado_p2o5_kg_ha||0).toFixed(1),(+c.aplicado_k2o_kg_ha||0).toFixed(1)]));
+          (+c.aplicado_n_kg_ha||0).toFixed(1),(+c.aplicado_p2o5_kg_ha||0).toFixed(1),(+c.aplicado_k2o_kg_ha||0).toFixed(1)])
+          .concat([["TOTAL","",ap.n.toFixed(1),ap.p.toFixed(1),ap.k.toFixed(1)]]));
     }
   }
-  if(pick.evi) t(["Data/hora da foto","Latitude","Longitude"],
-    D.evi.map(e=>[fmtDate(e.capturado_em),e.latitude??"—",e.longitude??"—"]));
+  // Metadados das evidências NÃO entram como tabela — aparecem apenas como legenda das fotos.
 
   // ---- FOTOS embutidas no PDF (baixadas do Supabase Storage via signed URL) ----
   if(pick.fotos && fotos && fotos.length){
