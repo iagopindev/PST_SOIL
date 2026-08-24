@@ -1489,46 +1489,38 @@ async function gerarPDF(D,pick,fotos=[]){
     });
     y+=6;
   }
+  // Tabela PADRÃO — estilo único para TODAS as seções do relatório
   const t=(head,body)=>{ if(!body.length) return;
     doc.autoTable({startY:y, head:[head], body, theme:"grid",
       headStyles:{fillColor:[231,238,246],textColor:[15,39,64],fontStyle:"bold"},
-      styles:{fontSize:8,cellPadding:4,textColor:[15,39,64]},
+      styles:{fontSize:8,cellPadding:4,textColor:[15,39,64],lineColor:[219,227,236],lineWidth:0.3},
       alternateRowStyles:{fillColor:[248,250,253]}, margin:{left:40,right:40}});
     y=doc.lastAutoTable.finalY+16; };
-  // Variante DESTACADA (cabeçalho azul-escuro + borda de realce) — usada para a RECOMENDAÇÃO
-  const tHi=(head,body)=>{ if(!body.length) return;
-    doc.autoTable({startY:y, head:[head], body, theme:"grid",
-      headStyles:{fillColor:[27,58,91],textColor:[255,255,255],fontStyle:"bold"},
-      styles:{fontSize:8,cellPadding:4,textColor:[15,39,64],lineColor:[27,58,91],lineWidth:0.4},
-      alternateRowStyles:{fillColor:[240,245,251]}, margin:{left:40,right:40}});
-    y=doc.lastAutoTable.finalY+16; };
-  // Faixa/título de seção destacada
+  // Faixa/título de seção PADRONIZADA (azul-escuro, texto branco) — usada em todas as seções
   const banner=(txt)=>{ const pageH=doc.internal.pageSize.getHeight();
-    if(y > pageH-60){ doc.addPage(); y=48; }
+    if(y > pageH-70){ doc.addPage(); y=48; }
     doc.setFillColor(27,58,91); doc.rect(40,y-9,W-80,22,"F");
     doc.setFontSize(10); doc.setTextColor(255,255,255); doc.setFont(undefined,"bold");
-    doc.text(txt,48,y+5); doc.setFont(undefined,"normal");
-    doc.setTextColor(15,39,64); y+=26; };
+    doc.text(String(txt).toUpperCase(),48,y+5); doc.setFont(undefined,"normal");
+    doc.setTextColor(15,39,64); y+=28; };
+  // Caixa de nota/selo (fundo claro, faixa lateral azul) — destaque textual da recomendação
+  const notebox=(txt)=>{ const pageH=doc.internal.pageSize.getHeight();
+    const lines=doc.splitTextToSize(txt, W-80-16);
+    const h=12+lines.length*11;
+    if(y > pageH-h-20){ doc.addPage(); y=48; }
+    doc.setFillColor(240,245,251); doc.rect(40,y-6,W-80,h,"F");
+    doc.setFillColor(27,58,91); doc.rect(40,y-6,4,h,"F");
+    doc.setFontSize(8.5); doc.setTextColor(27,58,91);
+    doc.text(lines,52,y+6); doc.setTextColor(15,39,64); y+=h+8; };
 
-  if(pick.obs) t(["Observação","O que foi observado","Ação a adotar"],
-    D.obs.map(o=>[o.categoria,o.observado||"—",o.acao||"—"]));
-  if(pick.nut && D.nut.length){
-    // RECOMENDAÇÃO TÉCNICA (aba Manejo da Lavoura) — destacada no PDF
-    banner("RECOMENDAÇÃO TÉCNICA — Manejo da Lavoura (NPK recomendado)");
-    // agrupa a nutrição por tipo de adubação (Correção / Manutenção) — uma tabela por tipo
-    const groups={};
-    D.nut.forEach(n=>{ const k=n.tipo_adub||v.tipo_adub||"—"; (groups[k]=groups[k]||[]).push(n); });
-    Object.keys(groups).forEach(k=>{
-      const rows=groups[k];
-      const npk=rows.reduce((a,n)=>({n:a.n+ +n.n_kg_ha,p:a.p+ +n.p2o5_kg_ha,k:a.k+ +n.k2o_kg_ha}),{n:0,p:0,k:0});
-      tHi([`Fertilizante recomendado — ${adubLabel(k)}`,"Dose (kg/ha)","N","P₂O₅","K₂O"],
-        rows.map(n=>[n.fert_nome,n.dose_kg_ha,(+n.n_kg_ha).toFixed(1),(+n.p2o5_kg_ha).toFixed(1),(+n.k2o_kg_ha).toFixed(1)])
-          .concat([["TOTAL","",npk.n.toFixed(1),npk.p.toFixed(1),npk.k.toFixed(1)]]));
-    });
-  }
-  if(pick.cpd) t(["Defensivo (CPD)","Dose"], D.cpd.map(c=>[c.cpd_nome,`${c.dose} ${c.unidade}`]));
-  if(pick.herb) t(["Herbicida","Dose"], D.herb.map(h=>[h.herb_nome,`${h.dose} ${h.unidade}`]));
-  if(pick.chk){
+  // 1) OBSERVAÇÕES DA VISITA
+  if(pick.obs){ banner("Observações da visita");
+    t(["Observação","O que foi observado","Ação a adotar"],
+      (D.obs.length?D.obs:[{}]).map(o=>[o.categoria||"—",o.observado||"—",o.acao||"—"])); }
+
+  // 2) PLANEJADO × EXECUTADO — ADESÃO DO PRODUTOR (vem ANTES da recomendação atual)
+  if(pick.chk && D.chk.length){
+    banner("Planejado × Executado — Adesão do Produtor");
     t(["Tipo","Recomendação anterior","Aplicado pelo produtor","Status"],
       D.chk.map(c=>[c.tipo,c.descricao,
         c.seguida?((c.aplicado_nome||"—")+" — "+(c.aplicado_dose??"—")+(c.tipo==='nutricao'?" kg/ha":(" "+(c.aplicado_unidade||"")))):"—",
@@ -1541,6 +1533,28 @@ async function gerarPDF(D,pick,fotos=[]){
           .concat([["TOTAL","",ap.n.toFixed(1),ap.p.toFixed(1),ap.k.toFixed(1)]]));
     }
   }
+
+  // 3) RECOMENDAÇÃO TÉCNICA — MANEJO DA LAVOURA (da visita atual)
+  if(pick.nut && D.nut.length){
+    banner("Recomendação Técnica — Manejo da Lavoura");
+    notebox("RECOMENDAÇÃO TÉCNICA — Estes dados são as recomendações do manejo da lavoura desta visita e devem ser comparadas, na próxima visita, com o que foi efetivamente aplicado pelo produtor.");
+    const groups={};
+    D.nut.forEach(n=>{ const k=n.tipo_adub||v.tipo_adub||"—"; (groups[k]=groups[k]||[]).push(n); });
+    Object.keys(groups).forEach(k=>{
+      const rows=groups[k];
+      const npk=rows.reduce((a,n)=>({n:a.n+ +n.n_kg_ha,p:a.p+ +n.p2o5_kg_ha,k:a.k+ +n.k2o_kg_ha}),{n:0,p:0,k:0});
+      t([`Fertilizante recomendado — ${adubLabel(k)}`,"Dose (kg/ha)","N","P₂O₅","K₂O"],
+        rows.map(n=>[n.fert_nome,n.dose_kg_ha,(+n.n_kg_ha).toFixed(1),(+n.p2o5_kg_ha).toFixed(1),(+n.k2o_kg_ha).toFixed(1)])
+          .concat([["TOTAL","",npk.n.toFixed(1),npk.p.toFixed(1),npk.k.toFixed(1)]]));
+    });
+    if(pick.cpd && D.cpd.length) t(["CPD recomendado","Dose","Unidade"], D.cpd.map(c=>[c.cpd_nome,c.dose,c.unidade]));
+    if(pick.herb && D.herb.length) t(["Herbicida recomendado","Dose","Unidade"], D.herb.map(h=>[h.herb_nome,h.dose,h.unidade]));
+  } else {
+    // Se não houver nutrição mas houver CPD/Herbicida, ainda exibe sob a mesma seção
+    if((pick.cpd && D.cpd.length) || (pick.herb && D.herb.length)) banner("Recomendação Técnica — Manejo da Lavoura");
+    if(pick.cpd && D.cpd.length) t(["CPD recomendado","Dose","Unidade"], D.cpd.map(c=>[c.cpd_nome,c.dose,c.unidade]));
+    if(pick.herb && D.herb.length) t(["Herbicida recomendado","Dose","Unidade"], D.herb.map(h=>[h.herb_nome,h.dose,h.unidade]));
+  }
   // Metadados das evidências NÃO entram como tabela — aparecem apenas como legenda das fotos.
 
   // ---- FOTOS embutidas no PDF (baixadas do Supabase Storage via signed URL) ----
@@ -1548,8 +1562,7 @@ async function gerarPDF(D,pick,fotos=[]){
     const pageH=doc.internal.pageSize.getHeight();
     const marginX=40, gap=12, colW=(W-marginX*2-gap)/2; // 2 colunas
     if(y > pageH-160){ doc.addPage(); y=48; }
-    doc.setFontSize(12); doc.setTextColor(15,39,64);
-    doc.text("Evidências fotográficas",marginX,y); y+=14;
+    banner("Evidências fotográficas");   // mesma faixa-título padrão das demais seções
     let col=0, rowY=y, rowMaxH=0;
     for(let i=0;i<fotos.length;i++){
       const p=fotos[i];
