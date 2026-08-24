@@ -666,8 +666,8 @@ function renderChecks(){
           <option value="custom" ${customSel?"selected":""}>✏️ Componha seu NPK / Outros</option>
           ${opts}
         </select>
-        <label>Quantidade aplicada (kg/ha)</label>
-        <input type="number" step="1" min="0" value="${r.ap_dose||''}" placeholder="kg/ha"
+        <label>Quantidade EXATA aplicada (kg/ha)${r.rec_dose!=null?` <span class="hint" style="font-weight:400">· recomendado: ${r.rec_dose} kg/ha</span>`:""}</label>
+        <input type="number" step="0.01" min="0" value="${r.ap_dose??''}" placeholder="digite o valor aplicado (kg/ha)"
           oninput="state.draft.checks[${i}].ap_dose=num(this.value);calcCheckNPK(${i})"/>
         ${customSel?`
         <div class="nutri-line" style="grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:6px">
@@ -682,10 +682,10 @@ function renderChecks(){
       const opts = cat.map(p=>`<option value="${p.id}" ${String(r.ap_id)===String(p.id)?"selected":""}>${p.molecula}</option>`).join("");
       panel = `
       <div class="subblock" style="margin-top:8px">
-        <label>Produto aplicado</label>
+        <label>Produto aplicado${r.rec_dose!=null?` <span class="hint" style="font-weight:400">· recomendado: ${r.rec_dose} ${r.rec_unidade||"L/ha"}</span>`:""}</label>
         <select onchange="checkSetProd(${i},this.value)">${opts}</select>
         <div class="nutri-line" style="grid-template-columns:1fr 100px;gap:8px;margin-top:6px">
-          <input type="number" step="0.01" min="0" placeholder="dose" value="${r.ap_dose||''}"
+          <input type="number" step="0.01" min="0" placeholder="dose exata aplicada" value="${r.ap_dose??''}"
             oninput="state.draft.checks[${i}].ap_dose=num(this.value)"/>
           <select onchange="state.draft.checks[${i}].ap_unidade=this.value">
             <option ${r.ap_unidade==='L/ha'?'selected':''}>L/ha</option>
@@ -711,16 +711,19 @@ function npkBoxes(r){
     <div class="npk-box"><div class="badge p">P₂O₅</div><div class="v">${(r.ap_p||0).toFixed(1)}</div><div class="hint">kg/ha</div></div>
     <div class="npk-box"><div class="badge k">K₂O</div><div class="v">${(r.ap_k||0).toFixed(1)}</div><div class="hint">kg/ha</div></div>`;
 }
-/* Marca/desmarca "seguiu"; ao marcar, pré-preenche o aplicado com a recomendação */
+/* Marca/desmarca "seguiu". Ao marcar, PRÉ-SELECIONA apenas o produto recomendado,
+   mas deixa a QUANTIDADE EM BRANCO — o consultor digita o valor EXATO aplicado.
+   O valor digitado é usado como está (NPK = dose × teor), nunca somado ao recomendado. */
 function checkToggle(i,checked){
   const r=state.draft.checks[i]; r.seguida=checked;
-  if(checked && r.ap_dose==null){ // primeira marcação: default = recomendado
+  if(checked && r.ap_id==null){ // primeira marcação: pré-seleciona o produto (dose fica vazia)
     r.ap_id = (r.rec_id!=null? r.rec_id : (r.tipo==='nutricao'?'custom':null));
     r.ap_nome = r.rec_nome||"";
-    r.ap_dose = (r.rec_dose!=null? r.rec_dose : 0);
+    r.ap_dose = null;              // EM BRANCO: valor exato a ser digitado pelo consultor
     r.ap_unidade = r.rec_unidade||"L/ha";
     r.substituicao = false;
-    if(r.tipo==='nutricao'){ r.ap_fert = state.catalogos.fert.find(x=>String(x.id)===String(r.ap_id))||null; calcCheckNPK(i); }
+    r.ap_n=r.ap_p=r.ap_k=0;
+    if(r.tipo==='nutricao'){ r.ap_fert = state.catalogos.fert.find(x=>String(x.id)===String(r.ap_id))||null; }
   }
   if(!checked){ // limpa o aplicado ao desmarcar
     r.ap_id=null; r.ap_nome=""; r.ap_dose=null; r.ap_unidade=null;
