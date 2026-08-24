@@ -307,10 +307,62 @@ window.addEventListener("online",updateNet); window.addEventListener("offline",u
    ===================================================================== */
 async function initAuth(){
   if(!sb){ renderConfigMissing(); return; }
+  // 1) Trata o retorno do link de redefinição ANTES de rotear (evita login silencioso).
+  //    O Supabase pode devolver o token no hash (#access_token&type=recovery) ou via evento.
+  const hash = window.location.hash || "";
+  const isRecovery = /type=recovery/.test(hash);
+  // Registra o listener primeiro para capturar o evento PASSWORD_RECOVERY.
+  sb.auth.onAuthStateChange((event,s)=>{
+    if(event==="PASSWORD_RECOVERY"){ renderResetPassword(); return; }
+    if(event==="SIGNED_OUT" || !s){ if(!state._resetting) renderLogin(); }
+  });
   const { data:{ session } } = await sb.auth.getSession();
+  if(isRecovery || state._resetting){ renderResetPassword(); return; }
   if(session){ await loadProfileAndRoute(); }
   else { renderLogin(); }
-  sb.auth.onAuthStateChange((_e,s)=>{ if(!s) renderLogin(); });
+}
+/* Tela para definir a NOVA senha após clicar no link de redefinição */
+function renderResetPassword(){
+  state._resetting = true;
+  root.innerHTML = `
+  <div class="app">
+    <div style="height:34px"></div>
+    <div class="center"><div style="font-size:2.2rem">🔑</div>
+      <h1 style="color:var(--brand-dark);margin-top:12px">Definir nova senha</h1>
+      <p class="hint">Escolha uma nova senha para acessar sua conta.</p></div>
+    <div class="card">
+      <label>Nova senha (mín. 6 caracteres)</label>
+      <input id="rp_pass" type="password" autocomplete="new-password" placeholder="••••••••"/>
+      <label>Confirmar nova senha</label>
+      <input id="rp_pass2" type="password" autocomplete="new-password" placeholder="••••••••"/>
+      <div class="spacer"></div>
+      <button class="btn" id="btnSetPass">Salvar nova senha</button>
+      <button class="btn ghost small" id="btnCancelReset" style="width:100%;margin-top:8px">Cancelar</button>
+    </div>
+  </div>`;
+  $("#btnSetPass").onclick=doSetNewPassword;
+  $("#btnCancelReset").onclick=async()=>{ state._resetting=false;
+    try{ await sb.auth.signOut(); }catch(e){}
+    cleanRecoveryHash(); renderLogin(); };
+  $("#rp_pass2").addEventListener("keydown",e=>{ if(e.key==="Enter") doSetNewPassword(); });
+}
+/* Remove o hash de recovery da URL para evitar reprocessamento ao recarregar */
+function cleanRecoveryHash(){
+  if(window.location.hash){
+    history.replaceState(null,"",window.location.pathname+window.location.search);
+  }
+}
+async function doSetNewPassword(){
+  const p1=$("#rp_pass").value, p2=$("#rp_pass2").value;
+  if(p1.length<6) return toast("A senha deve ter ao menos 6 caracteres","err");
+  if(p1!==p2)     return toast("As senhas não coincidem","err");
+  const b=$("#btnSetPass"); b.innerHTML='<span class="loader"></span> Salvando…'; b.disabled=true;
+  const { error } = await sb.auth.updateUser({ password:p1 });
+  b.disabled=false; b.textContent="Salvar nova senha";
+  if(error) return toast(error.message,"err");
+  state._resetting=false; cleanRecoveryHash();
+  toast("Senha atualizada com sucesso! Entrando…","ok");
+  await loadProfileAndRoute();  // já há sessão válida ⇒ segue direto para o app
 }
 
 function renderConfigMissing(){
@@ -384,8 +436,17 @@ async function doSignup(){
 async function doReset(){
   const email=$("#li_email").value.trim().toLowerCase();
   if(!email) return toast("Digite seu e-mail no campo acima primeiro","err");
-  const { error } = await sb.auth.resetPasswordForEmail(email);
-  toast(error? error.message : "Enviamos um link de redefinição para seu e-mail.", error?"err":"ok");
+  // valida formato mínimo do e-mail antes de chamar a API
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return toast("E-mail inválido","err");
+  const b=$("#btnReset"); const orig=b?b.textContent:"";
+  if(b){ b.disabled=true; b.innerHTML='<span class="loader"></span> Enviando…'; }
+  // redirectTo garante que o link volte para ESTE app, disparando o modo de redefinição
+  const { error } = await sb.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin + window.location.pathname
+  });
+  if(b){ b.disabled=false; b.textContent=orig||"Esqueci minha senha"; }
+  // Mensagem neutra (não revela se o e-mail existe — boa prática de segurança)
+  toast(error? error.message : "Se o e-mail estiver cadastrado, enviamos um link de redefinição.", error?"err":"ok");
 }
 
 async function loadProfileAndRoute(){
@@ -1244,7 +1305,16 @@ async function gerarPDF(D,pick,fotos=[]){
       `Tipo de adubação: ${adubLabel(v.tipo_adub)}`,
       `Versão: v${v.versao||1}${(v.versao>1)?" (editado em "+fmtDate(v.editado_em)+")":" (original)"}`,
     ];
-    linhas.forEach(l=>{doc.text(l,40,y); y+=13;}); y+=6;
+    // Quebra automática de linha para textos longos (ex.: Motivo), respeitando a margem
+    const maxW = W - 80; // 40pt de margem em cada lado
+    linhas.forEach(l=>{
+      const wrapped = doc.splitTextToSize(String(l), maxW);
+      wrapped.forEach(wl=>{
+        if(y > doc.internal.pageSize.getHeight()-40){ doc.addPage(); y=48; }
+        doc.text(wl,40,y); y+=13;
+      });
+    });
+    y+=6;
   }
   const t=(head,body)=>{ if(!body.length) return;
     doc.autoTable({startY:y, head:[head], body, theme:"grid",
@@ -1440,6 +1510,7 @@ function drawDash(){
     && (!A.filters.adub||String(x.tipo_adub||"").split("+").includes(A.filters.adub))
     && (!A.filters.ini||x.ano_mes>=A.filters.ini.slice(0,7))
     && (!A.filters.fim||x.ano_mes<=A.filters.fim.slice(0,7)));
+  A._npk = npk; // base para o painel 11.4 (visão geral / por fazenda)
 
   $("#dashContent").innerHTML=`
     <div class="section-title">Visão geral</div>
@@ -1462,8 +1533,11 @@ function drawDash(){
     <div class="card tablewrap"><table><thead><tr><th>Consultor</th><th>Fazenda</th><th>Visitas</th></tr></thead>
       <tbody>${tableCF(vis)}</tbody></table></div>
 
-    <div class="section-title">11.2 · Fazendas NÃO visitadas (alerta > ${ALERTA_DIAS} dias)</div>
-    <div class="card tablewrap"><table><thead><tr><th>Fazenda</th><th>Consultor</th><th>Última visita</th><th>Dias</th></tr></thead>
+    <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <span>11.2 · Fazendas NÃO visitadas (alerta > ${ALERTA_DIAS} dias)</span>
+      <button class="btn small secondary" style="width:auto;padding:5px 10px" onclick="toggleNaoVisit(this)">Ocultar</button>
+    </div>
+    <div class="card tablewrap" id="naoVisitCard"><table><thead><tr><th>Fazenda</th><th>Consultor</th><th>Última visita</th><th>Dias</th></tr></thead>
       <tbody>${tableNaoVisit(d.st)}</tbody></table></div>
 
     <div class="section-title">11.3 · Principais recomendações</div>
@@ -1476,16 +1550,29 @@ function drawDash(){
       <div class="card tablewrap"><b>Top CPD / Herbicidas</b>${miniTable(d.tc.concat(d.th),["item","recomendacoes"],["Item","Rec."])}</div>
     </div>
 
-    <div class="section-title">11.4 · NPK por fazenda (kg/ha)</div>
-    <div class="card"><div class="chartbox"><canvas id="chNPK"></canvas></div></div>
-    <div class="card tablewrap"><table><thead><tr><th>Fazenda</th><th>Adub.</th><th>N</th><th>P₂O₅</th><th>K₂O</th></tr></thead>
-      <tbody>${tableNPK(npk)}</tbody></table></div>
-    <p class="hint">Área por talhão disponível ⇒ visão em kg totais pode ser habilitada futuramente. Unidade atual: kg/ha.</p>
+    <div class="section-title">11.4 · NPK por fazenda (kg/ha) — média dos lançamentos ≠ 0</div>
+    <div class="card">
+      <div class="filters">
+        <div><label>Visão</label>
+          <select id="npkView" onchange="renderNPK114()">
+            <option value="fazenda">Por fazenda</option>
+            <option value="geral">Média geral</option>
+          </select></div>
+        <div><label>Filtrar fazenda(s)</label>
+          <select id="npkFaz" multiple size="4" onchange="renderNPK114()">${
+            [...new Set(npk.map(x=>x.fazenda))].sort().map(f=>`<option>${f}</option>`).join("")
+          }</select></div>
+      </div>
+      <p class="hint">Segure Ctrl/Cmd (ou toque) para escolher várias fazendas. Vazio = todas.</p>
+    </div>
+    <div id="npk114"></div>
+    <p class="hint">Unidade: kg/ha. A média considera apenas lançamentos com valor &gt; 0 (cada nutriente é contabilizado de forma independente).</p>
     <div class="spacer"></div><div class="spacer"></div>
   `;
 
   // ---- gráficos ----
   drawCharts(vis,d,npk);
+  renderNPK114(); // painel 11.4 (chart + tabela/KPIs conforme a visão selecionada)
 }
 
 function tableCF(vis){
@@ -1494,6 +1581,11 @@ function tableCF(vis){
     .sort((a,b)=>b[2]-a[2]);
   return rows.length?rows.map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join("")
     :`<tr><td colspan="3" class="hint">Sem visitas no filtro.</td></tr>`;
+}
+function toggleNaoVisit(btn){
+  const card=$("#naoVisitCard"); if(!card) return;
+  const hidden=card.classList.toggle("hidden");
+  btn.textContent=hidden?"Mostrar":"Ocultar";
 }
 function tableNaoVisit(st){
   const rows=st.filter(s=>s.ultima_visita===null || s.dias_sem_visita>ALERTA_DIAS)
@@ -1506,14 +1598,70 @@ function tableNaoVisit(st){
       <td>${s.dias_sem_visita!=null?`<span class="badge ${s.dias_sem_visita>ALERTA_DIAS?'dang':'ok'}">${s.dias_sem_visita}</span>`:"—"}</td></tr>`;
   }).join(""):`<tr><td colspan="4" class="hint">Todas as fazendas visitadas dentro do prazo. 🎉</td></tr>`;
 }
-function tableNPK(npk){
-  const m={}; npk.forEach(x=>{const k=x.fazenda+"||"+x.tipo_adub;
-    if(!m[k])m[k]={f:x.fazenda,a:x.tipo_adub,n:0,p:0,k:0};
-    m[k].n+= +x.n_kg_ha; m[k].p+= +x.p2o5_kg_ha; m[k].k+= +x.k2o_kg_ha;});
-  const rows=Object.values(m);
-  return rows.length?rows.map(r=>`<tr><td>${r.f}</td><td>${r.a||"—"}</td>
-    <td>${r.n.toFixed(1)}</td><td>${r.p.toFixed(1)}</td><td>${r.k.toFixed(1)}</td></tr>`).join("")
-    :`<tr><td colspan="5" class="hint">Sem dados de nutrição no filtro.</td></tr>`;
+/* Média dos lançamentos ≠ 0 (cada nutriente conta apenas registros > 0).
+   byFarm=true  -> agrega por fazenda + tipo de adubação (linhas).
+   byFarm=false -> agrega tudo em um único resultado (média geral). */
+function npkAggregate(rows, byFarm){
+  const acc=(o,vn,vp,vk)=>{ if(vn>0){o.nS+=vn;o.nC++;} if(vp>0){o.pS+=vp;o.pC++;} if(vk>0){o.kS+=vk;o.kC++;} };
+  const mk=()=>({nS:0,nC:0,pS:0,pC:0,kS:0,kC:0});
+  if(byFarm){
+    const m={};
+    rows.forEach(x=>{ const key=x.fazenda+"||"+x.tipo_adub;
+      if(!m[key]) m[key]=Object.assign({f:x.fazenda,a:x.tipo_adub},mk());
+      acc(m[key],+x.n_kg_ha,+x.p2o5_kg_ha,+x.k2o_kg_ha); });
+    return Object.values(m).map(r=>({f:r.f,a:r.a,
+      n:r.nC?r.nS/r.nC:0, p:r.pC?r.pS/r.pC:0, k:r.kC?r.kS/r.kC:0}));
+  } else {
+    const o=mk(); rows.forEach(x=>acc(o,+x.n_kg_ha,+x.p2o5_kg_ha,+x.k2o_kg_ha));
+    return {n:o.nC?o.nS/o.nC:0, p:o.pC?o.pS/o.pC:0, k:o.kC?o.kS/o.kC:0};
+  }
+}
+/* Renderiza o painel 11.4 conforme a visão (por fazenda / média geral) e o
+   filtro de fazendas do próprio painel. Base: A._npk (já filtrado no global). */
+function renderNPK114(){
+  const cont=$("#npk114"); if(!cont) return;
+  const view=$("#npkView")?.value||"fazenda";
+  const fsel=$("#npkFaz")?[...$("#npkFaz").selectedOptions].map(o=>o.value):[];
+  let rows=(A._npk||[]);
+  if(fsel.length) rows=rows.filter(x=>fsel.includes(x.fazenda));
+  try{ A.charts.npk?.destroy(); }catch(e){}
+
+  if(view==="geral"){
+    const g=npkAggregate(rows,false);
+    cont.innerHTML=`
+      <div class="card"><div class="chartbox"><canvas id="chNPK"></canvas></div></div>
+      <div class="kpis">
+        <div class="kpi"><div class="v">${g.n.toFixed(1)}</div><div class="l">N médio (kg/ha)</div></div>
+        <div class="kpi"><div class="v">${g.p.toFixed(1)}</div><div class="l">P₂O₅ médio (kg/ha)</div></div>
+        <div class="kpi"><div class="v">${g.k.toFixed(1)}</div><div class="l">K₂O médio (kg/ha)</div></div>
+      </div>
+      <p class="hint">${fsel.length?`Média geral de ${fsel.length} fazenda(s) selecionada(s).`:"Média geral de todas as fazendas do filtro."}</p>`;
+    A.charts.npk=new Chart($("#chNPK"),{type:"bar",
+      data:{labels:["N","P₂O₅","K₂O"],datasets:[{label:"Média (kg/ha)",
+        data:[g.n,g.p,g.k],backgroundColor:["#2d6cdf","#8e44ad","#e08e0b"]}]},
+      options:{...chartOpts(),plugins:{legend:{display:false}}}});
+  } else {
+    const rr=npkAggregate(rows,true);
+    const tbody = rr.length
+      ? rr.map(r=>`<tr><td>${r.f}</td><td>${adubLabel(r.a)}</td>
+          <td>${r.n.toFixed(1)}</td><td>${r.p.toFixed(1)}</td><td>${r.k.toFixed(1)}</td></tr>`).join("")
+      : `<tr><td colspan="5" class="hint">Sem dados de nutrição no filtro.</td></tr>`;
+    cont.innerHTML=`
+      <div class="card"><div class="chartbox"><canvas id="chNPK"></canvas></div></div>
+      <div class="card tablewrap"><table>
+        <thead><tr><th>Fazenda</th><th>Adub.</th><th>N</th><th>P₂O₅</th><th>K₂O</th></tr></thead>
+        <tbody>${tbody}</tbody></table></div>`;
+    // gráfico: média por fazenda (soma dos tipos de adubação da mesma fazenda p/ visualização)
+    const byF={}; rr.forEach(r=>{ if(!byF[r.f])byF[r.f]={n:0,p:0,k:0};
+      byF[r.f].n+=r.n; byF[r.f].p+=r.p; byF[r.f].k+=r.k; });
+    const fl=Object.keys(byF).slice(0,12);
+    A.charts.npk=new Chart($("#chNPK"),{type:"bar",
+      data:{labels:fl,datasets:[
+        {label:"N",data:fl.map(f=>byF[f].n),backgroundColor:"#2d6cdf"},
+        {label:"P₂O₅",data:fl.map(f=>byF[f].p),backgroundColor:"#8e44ad"},
+        {label:"K₂O",data:fl.map(f=>byF[f].k),backgroundColor:"#e08e0b"}]},
+      options:chartOpts()});
+  }
 }
 function miniTable(rows,keys,heads){
   if(!rows.length) return `<p class="hint">—</p>`;
@@ -1546,16 +1694,7 @@ function drawCharts(vis,d,npk){
   A.charts.ade=new Chart($("#chAde"),{type:"doughnut",
     data:{labels:["Seguidas","Não seguidas"],datasets:[{data:[seg,Math.max(tot-seg,0)],
       backgroundColor:[green,"#e2b4ab"]}]},options:{responsive:true,maintainAspectRatio:false}});
-  // NPK por fazenda
-  const byF={}; npk.forEach(x=>{if(!byF[x.fazenda])byF[x.fazenda]={n:0,p:0,k:0};
-    byF[x.fazenda].n+= +x.n_kg_ha; byF[x.fazenda].p+= +x.p2o5_kg_ha; byF[x.fazenda].k+= +x.k2o_kg_ha;});
-  const fl=Object.keys(byF).slice(0,12);
-  A.charts.npk=new Chart($("#chNPK"),{type:"bar",
-    data:{labels:fl,datasets:[
-      {label:"N",data:fl.map(f=>byF[f].n),backgroundColor:"#2d6cdf"},
-      {label:"P₂O₅",data:fl.map(f=>byF[f].p),backgroundColor:"#8e44ad"},
-      {label:"K₂O",data:fl.map(f=>byF[f].k),backgroundColor:"#e08e0b"}]},
-    options:chartOpts()});
+  // NPK (11.4) é renderizado separadamente por renderNPK114()
 }
 function chartOpts(horizontalHint){
   return {responsive:true,maintainAspectRatio:false,
