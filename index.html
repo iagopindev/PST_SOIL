@@ -635,17 +635,125 @@ function toLocalInput(iso){
   const d=new Date(iso); d.setMinutes(d.getMinutes()-d.getTimezoneOffset());
   return d.toISOString().slice(0,16);
 }
-/* Renderiza o bloco de continuidade a partir de state.draft.checks (reutilizado em novo/edição) */
+/* Card de continuidade/adesão (container vazio — o conteúdo é montado por renderChecks) */
 function checksHtml(dateLabel){
   if(!state.draft.checks.length) return "";
   return `
-    <div class="section-title">Continuidade${dateLabel?(" — visita de "+dateLabel):""}</div>
-    <div class="card"><p class="hint">Marque o que o produtor seguiu desde a última visita:</p>
-      <div id="checksList">${state.draft.checks.map((r,i)=>`
-        <div class="check"><input type="checkbox" ${r.seguida?"checked":""} onchange="state.draft.checks[${i}].seguida=this.checked"/>
-        <div class="lbl"><span class="badge ${r.tipo==='nutricao'?'ok':r.tipo==='cpd'?'warn':r.tipo==='herb'?'n':'dang'}">${r.tipo}</span>
-        ${r.descricao}</div></div>`).join("")}</div>
+    <div class="section-title">Continuidade — adesão do produtor${dateLabel?(" · visita de "+dateLabel):""}</div>
+    <div class="card"><p class="hint">Marque o que o produtor seguiu. Ao marcar <b>Seguiu</b>, informe o que foi
+      <b>efetivamente aplicado</b>. Trocar o produto recomendado é registrado como <b>desvio</b>.</p>
+      <div id="checksList"></div>
     </div>`;
+}
+/* Adesão efetiva = seguiu E sem substituição de produto (substituição = desvio) */
+function adesaoEfetiva(r){ return !!r.seguida && !r.substituicao; }
+/* Renderiza a lista de recomendações com expansão de "aplicado" quando seguida */
+function renderChecks(){
+  const box=$("#checksList"); if(!box) return;
+  box.innerHTML = state.draft.checks.map((r,i)=>{
+    const badge = r.tipo==='nutricao'?'ok':r.tipo==='cpd'?'warn':r.tipo==='herb'?'n':'dang';
+    const status = r.seguida
+      ? (r.substituicao ? `<span class="badge warn">desvio (substituição)</span>` : `<span class="badge ok">seguiu</span>`)
+      : `<span class="badge dang">não seguiu</span>`;
+    let panel = "";
+    if(r.seguida && r.tipo==='nutricao'){
+      const opts = state.catalogos.fert.map(f=>`<option value="${f.id}" ${String(r.ap_id)===String(f.id)?"selected":""}>${f.nome}</option>`).join("");
+      const customSel = r.ap_id==='custom';
+      panel = `
+      <div class="subblock" style="margin-top:8px">
+        <label>Fertilizante aplicado</label>
+        <select onchange="checkSetFert(${i},this.value)">
+          <option value="custom" ${customSel?"selected":""}>✏️ Componha seu NPK / Outros</option>
+          ${opts}
+        </select>
+        <label>Quantidade aplicada (kg/ha)</label>
+        <input type="number" step="1" min="0" value="${r.ap_dose||''}" placeholder="kg/ha"
+          oninput="state.draft.checks[${i}].ap_dose=num(this.value);calcCheckNPK(${i})"/>
+        ${customSel?`
+        <div class="nutri-line" style="grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:6px">
+          <input type="number" step="0.1" min="0" placeholder="% N"    value="${r.ap_cn||''}" oninput="state.draft.checks[${i}].ap_cn=num(this.value);calcCheckNPK(${i})"/>
+          <input type="number" step="0.1" min="0" placeholder="% P₂O₅" value="${r.ap_cp||''}" oninput="state.draft.checks[${i}].ap_cp=num(this.value);calcCheckNPK(${i})"/>
+          <input type="number" step="0.1" min="0" placeholder="% K₂O"  value="${r.ap_ck||''}" oninput="state.draft.checks[${i}].ap_ck=num(this.value);calcCheckNPK(${i})"/>
+        </div>`:""}
+        <div class="npk-summary" id="npkChk_${i}">${npkBoxes(r)}</div>
+      </div>`;
+    } else if(r.seguida && (r.tipo==='cpd' || r.tipo==='herb')){
+      const cat = r.tipo==='cpd' ? state.catalogos.cpd : state.catalogos.herb;
+      const opts = cat.map(p=>`<option value="${p.id}" ${String(r.ap_id)===String(p.id)?"selected":""}>${p.molecula}</option>`).join("");
+      panel = `
+      <div class="subblock" style="margin-top:8px">
+        <label>Produto aplicado</label>
+        <select onchange="checkSetProd(${i},this.value)">${opts}</select>
+        <div class="nutri-line" style="grid-template-columns:1fr 100px;gap:8px;margin-top:6px">
+          <input type="number" step="0.01" min="0" placeholder="dose" value="${r.ap_dose||''}"
+            oninput="state.draft.checks[${i}].ap_dose=num(this.value)"/>
+          <select onchange="state.draft.checks[${i}].ap_unidade=this.value">
+            <option ${r.ap_unidade==='L/ha'?'selected':''}>L/ha</option>
+            <option ${r.ap_unidade==='kg/ha'?'selected':''}>kg/ha</option>
+          </select>
+        </div>
+      </div>`;
+    }
+    return `
+    <div class="check" style="flex-direction:column;align-items:stretch">
+      <div style="display:flex;align-items:flex-start;gap:10px">
+        <input type="checkbox" ${r.seguida?"checked":""} onchange="checkToggle(${i},this.checked)"/>
+        <div class="lbl"><span class="badge ${badge}">${r.tipo}</span> ${r.descricao}
+          <div style="margin-top:4px">${status}</div></div>
+      </div>
+      ${panel}
+    </div>`;
+  }).join("");
+}
+function npkBoxes(r){
+  return `
+    <div class="npk-box"><div class="badge n">N</div><div class="v">${(r.ap_n||0).toFixed(1)}</div><div class="hint">kg/ha</div></div>
+    <div class="npk-box"><div class="badge p">P₂O₅</div><div class="v">${(r.ap_p||0).toFixed(1)}</div><div class="hint">kg/ha</div></div>
+    <div class="npk-box"><div class="badge k">K₂O</div><div class="v">${(r.ap_k||0).toFixed(1)}</div><div class="hint">kg/ha</div></div>`;
+}
+/* Marca/desmarca "seguiu"; ao marcar, pré-preenche o aplicado com a recomendação */
+function checkToggle(i,checked){
+  const r=state.draft.checks[i]; r.seguida=checked;
+  if(checked && r.ap_dose==null){ // primeira marcação: default = recomendado
+    r.ap_id = (r.rec_id!=null? r.rec_id : (r.tipo==='nutricao'?'custom':null));
+    r.ap_nome = r.rec_nome||"";
+    r.ap_dose = (r.rec_dose!=null? r.rec_dose : 0);
+    r.ap_unidade = r.rec_unidade||"L/ha";
+    r.substituicao = false;
+    if(r.tipo==='nutricao'){ r.ap_fert = state.catalogos.fert.find(x=>String(x.id)===String(r.ap_id))||null; calcCheckNPK(i); }
+  }
+  if(!checked){ // limpa o aplicado ao desmarcar
+    r.ap_id=null; r.ap_nome=""; r.ap_dose=null; r.ap_unidade=null;
+    r.ap_cn=r.ap_cp=r.ap_ck=0; r.ap_n=r.ap_p=r.ap_k=0; r.substituicao=false;
+  }
+  renderChecks();
+}
+/* Seleção de fertilizante aplicado (nutrição) — detecta substituição e recalcula NPK */
+function checkSetFert(i,val){
+  const r=state.draft.checks[i];
+  if(val==='custom'){ r.ap_id='custom'; r.ap_nome='Componha seu NPK / Outros';
+    r.ap_cn=r.ap_cn||0; r.ap_cp=r.ap_cp||0; r.ap_ck=r.ap_ck||0; r.ap_fert=null; }
+  else { const f=state.catalogos.fert.find(x=>String(x.id)===String(val));
+    r.ap_id=f?f.id:null; r.ap_nome=f?f.nome:''; r.ap_fert=f||null; }
+  r.substituicao = (String(r.ap_id)!==String(r.rec_id)) || (r.ap_id==='custom' && r.rec_id!=null);
+  calcCheckNPK(i); renderChecks();
+}
+/* Seleção de produto aplicado (CPD/Herbicida) — detecta substituição */
+function checkSetProd(i,val){
+  const r=state.draft.checks[i];
+  const cat=r.tipo==='cpd'?state.catalogos.cpd:state.catalogos.herb;
+  const p=cat.find(x=>String(x.id)===String(val));
+  r.ap_id=p?p.id:null; r.ap_nome=p?p.molecula:'';
+  r.substituicao = String(r.ap_id)!==String(r.rec_id);
+  renderChecks();
+}
+/* Calcula o NPK APLICADO de uma recomendação de nutrição */
+function calcCheckNPK(i){
+  const r=state.draft.checks[i]; const d=num(r.ap_dose);
+  if(r.ap_id==='custom'){ r.ap_n=d*num(r.ap_cn)/100; r.ap_p=d*num(r.ap_cp)/100; r.ap_k=d*num(r.ap_ck)/100; }
+  else { const f=r.ap_fert || state.catalogos.fert.find(x=>String(x.id)===String(r.ap_id)) || {};
+    r.ap_fert=f; r.ap_n=d*num(f.n)/100; r.ap_p=d*num(f.p2o5)/100; r.ap_k=d*num(f.k2o)/100; }
+  const el=$("#npkChk_"+i); if(el) el.innerHTML=npkBoxes(r);
 }
 
 async function iniciarVisita(talhao, existing=null){
@@ -762,7 +870,7 @@ async function iniciarVisita(talhao, existing=null){
       syncObsDetails();
     }
   }
-  renderNutri(); renderCPD(); renderHerb(); renderPhotos();
+  renderNutri(); renderCPD(); renderHerb(); renderPhotos(); renderChecks();
   $("#cpdSel").onchange  =e=>{ if(e.target.value){ addCPD(+e.target.value);  e.target.value=""; } };
   $("#herbSel").onchange =e=>{ if(e.target.value){ addHerb(+e.target.value); e.target.value=""; } };
   $("#photoInput").onchange=onPhotos;
@@ -981,26 +1089,28 @@ async function carregarRecomendacoesAnteriores(){
   if(!prev||!prev.length) return {html:""};
   const vid=prev[0].id;
   const [n,c,h,o] = await Promise.all([
-    sb.from("visita_nutricao").select("fert_nome,dose_kg_ha").eq("visita_id",vid),
-    sb.from("visita_cpd").select("cpd_nome,dose,unidade").eq("visita_id",vid),
-    sb.from("visita_herb").select("herb_nome,dose,unidade").eq("visita_id",vid),
+    sb.from("visita_nutricao").select("fert_id,fert_nome,dose_kg_ha").eq("visita_id",vid),
+    sb.from("visita_cpd").select("cpd_id,cpd_nome,dose,unidade").eq("visita_id",vid),
+    sb.from("visita_herb").select("herb_id,herb_nome,dose,unidade").eq("visita_id",vid),
     sb.from("visita_observacoes").select("categoria,acao").eq("visita_id",vid),
   ]);
   const recs=[];
-  (n.data||[]).forEach(x=>recs.push({tipo:"nutricao",descricao:`${x.fert_nome} — ${x.dose_kg_ha} kg/ha`}));
-  (c.data||[]).forEach(x=>recs.push({tipo:"cpd",descricao:`${x.cpd_nome} — ${x.dose} ${x.unidade}`}));
-  (h.data||[]).forEach(x=>recs.push({tipo:"herb",descricao:`${x.herb_nome} — ${x.dose} ${x.unidade}`}));
+  (n.data||[]).forEach(x=>recs.push({tipo:"nutricao",descricao:`${x.fert_nome} — ${x.dose_kg_ha} kg/ha`,
+    rec_id:x.fert_id, rec_nome:x.fert_nome, rec_dose:Number(x.dose_kg_ha)||0}));
+  (c.data||[]).forEach(x=>recs.push({tipo:"cpd",descricao:`${x.cpd_nome} — ${x.dose} ${x.unidade}`,
+    rec_id:x.cpd_id, rec_nome:x.cpd_nome, rec_dose:Number(x.dose)||0, rec_unidade:x.unidade}));
+  (h.data||[]).forEach(x=>recs.push({tipo:"herb",descricao:`${x.herb_nome} — ${x.dose} ${x.unidade}`,
+    rec_id:x.herb_id, rec_nome:x.herb_nome, rec_dose:Number(x.dose)||0, rec_unidade:x.unidade}));
   (o.data||[]).forEach(x=>{ if(x.acao) recs.push({tipo:"acao",descricao:`${x.categoria}: ${x.acao}`}); });
   if(!recs.length) return {html:""};
   state.draft._origem=vid;
-  state.draft.checks=recs.map(r=>({...r,seguida:false}));
+  state.draft.checks=recs.map(r=>({...r, seguida:false, ap_id:null, ap_nome:"", ap_dose:null,
+    ap_unidade:null, ap_cn:0, ap_cp:0, ap_ck:0, ap_n:0, ap_p:0, ap_k:0, ap_fert:null, substituicao:false}));
   const html=`
-    <div class="section-title">Continuidade — visita de ${fmtDay(prev[0].inicio_em)}</div>
-    <div class="card"><p class="hint">Marque o que o produtor seguiu desde a última visita:</p>
-      <div id="checksList">${state.draft.checks.map((r,i)=>`
-        <div class="check"><input type="checkbox" onchange="state.draft.checks[${i}].seguida=this.checked"/>
-        <div class="lbl"><span class="badge ${r.tipo==='nutricao'?'ok':r.tipo==='cpd'?'warn':r.tipo==='herb'?'n':'dang'}">${r.tipo}</span>
-        ${r.descricao}</div></div>`).join("")}</div>
+    <div class="section-title">Continuidade — adesão do produtor · visita de ${fmtDay(prev[0].inicio_em)}</div>
+    <div class="card"><p class="hint">Marque o que o produtor seguiu. Ao marcar <b>Seguiu</b>, informe o que foi
+      <b>efetivamente aplicado</b>. Trocar o produto recomendado é registrado como <b>desvio</b>.</p>
+      <div id="checksList"></div>
     </div>`;
   return {html};
 }
@@ -1075,7 +1185,16 @@ async function salvarVisita(){
       state.draft.herb.map(h=>({visita_id:vid, herb_id:h.herb_id, herb_nome:h.herb_nome, dose:num(h.dose), unidade:h.unidade}))));
     if(state.draft.checks.length) jobs.push(sb.from("visita_recomendacoes_check").insert(
       state.draft.checks.map(r=>({visita_id:vid, origem_visita_id:state.draft._origem||null,
-        tipo:r.tipo, descricao:r.descricao, seguida:r.seguida}))));
+        tipo:r.tipo, descricao:r.descricao, seguida:r.seguida,
+        substituicao: !!r.substituicao,
+        adesao_efetiva: adesaoEfetiva(r),
+        aplicado_nome: r.seguida ? (r.ap_nome||null) : null,
+        aplicado_dose: r.seguida ? (r.ap_dose!=null?num(r.ap_dose):null) : null,
+        aplicado_unidade: r.seguida ? (r.ap_unidade||null) : null,
+        aplicado_n_kg_ha: (r.seguida && r.tipo==='nutricao') ? +(+r.ap_n||0).toFixed(4) : null,
+        aplicado_p2o5_kg_ha: (r.seguida && r.tipo==='nutricao') ? +(+r.ap_p||0).toFixed(4) : null,
+        aplicado_k2o_kg_ha: (r.seguida && r.tipo==='nutricao') ? +(+r.ap_k||0).toFixed(4) : null
+      }))));
     // Sobe as fotos (≤4, comprimidas q0.6) ao Supabase Storage e obtém os paths
     const fotoMetas = await uploadFotosSupabase(vid);
     if(fotoMetas.length) jobs.push(sb.from("evidencias_meta").insert(
@@ -1182,7 +1301,24 @@ async function editarVisita(vid){
     }
     draft.cpd  = D.cpd.map(c=>({cpd_id:c.cpd_id, cpd_nome:c.cpd_nome, dose:Number(c.dose)||0, unidade:c.unidade||"L/ha"}));
     draft.herb = D.herb.map(h=>({herb_id:h.herb_id, herb_nome:h.herb_nome, dose:Number(h.dose)||0, unidade:h.unidade||"L/ha"}));
-    draft.checks = D.chk.map(c=>({tipo:c.tipo, descricao:c.descricao, seguida:!!c.seguida}));
+    draft.checks = D.chk.map(c=>{
+      // reidentifica o produto aplicado no catálogo (para dropdown/NPK)
+      let ap_id=null, ap_fert=null;
+      if(c.aplicado_nome){
+        if(c.tipo==='nutricao'){ const f=state.catalogos.fert.find(x=>x.nome===c.aplicado_nome);
+          ap_id=f?f.id:'custom'; ap_fert=f||null; }
+        else if(c.tipo==='cpd'){ const p=state.catalogos.cpd.find(x=>x.molecula===c.aplicado_nome); ap_id=p?p.id:null; }
+        else if(c.tipo==='herb'){ const p=state.catalogos.herb.find(x=>x.molecula===c.aplicado_nome); ap_id=p?p.id:null; }
+      }
+      return {tipo:c.tipo, descricao:c.descricao, seguida:!!c.seguida,
+        substituicao:!!c.substituicao,
+        rec_id:null, rec_nome:null, rec_dose:null, rec_unidade:null,
+        ap_id, ap_fert, ap_nome:c.aplicado_nome||"",
+        ap_dose:(c.aplicado_dose!=null?Number(c.aplicado_dose):null),
+        ap_unidade:c.aplicado_unidade||"L/ha",
+        ap_cn:0, ap_cp:0, ap_ck:0,
+        ap_n:Number(c.aplicado_n_kg_ha)||0, ap_p:Number(c.aplicado_p2o5_kg_ha)||0, ap_k:Number(c.aplicado_k2o_kg_ha)||0};
+    });
     draft._origem = (D.chk[0] && D.chk[0].origem_visita_id) || null;
     // Fotos: reconstrói do Supabase Storage. Gera signed URLs para preview e
     // mantém o storage_path para preservar as imagens já existentes ao salvar.
@@ -1218,11 +1354,12 @@ async function verVisita(vid){
       <div class="hint">${(v.versao>1)?`<span class="badge warn">v${v.versao}</span> Relatório editado em ${fmtDate(v.editado_em)}`:`<span class="hint">Versão v1 (original)</span>`}</div>
     </div>
     ${sec("Observações", D.obs.map(o=>`<tr><td>${o.categoria}</td><td>${o.observado||"—"}</td><td>${o.acao||"—"}</td></tr>`).join(""), ["Categoria","Observado","Ação"])}
-    ${sec("Nutrição (NPK kg/ha: N "+npk.n.toFixed(1)+" · P₂O₅ "+npk.p.toFixed(1)+" · K₂O "+npk.k.toFixed(1)+")",
+    ${sec("Nutrição — NPK RECOMENDADO (kg/ha: N "+npk.n.toFixed(1)+" · P₂O₅ "+npk.p.toFixed(1)+" · K₂O "+npk.k.toFixed(1)+")",
        D.nut.map(n=>`<tr><td>${adubLabel(n.tipo_adub)}</td><td>${n.fert_nome}</td><td>${n.dose_kg_ha}</td><td>${(+n.n_kg_ha).toFixed(1)}/${(+n.p2o5_kg_ha).toFixed(1)}/${(+n.k2o_kg_ha).toFixed(1)}</td></tr>`).join(""), ["Adub.","Fertilizante","kg/ha","N/P/K"])}
     ${sec("CPD", D.cpd.map(c=>`<tr><td>${c.cpd_nome}</td><td>${c.dose} ${c.unidade}</td></tr>`).join(""), ["Defensivo","Dose"])}
     ${sec("Herbicidas", D.herb.map(h=>`<tr><td>${h.herb_nome}</td><td>${h.dose} ${h.unidade}</td></tr>`).join(""), ["Herbicida","Dose"])}
-    ${D.chk.length?sec("Adesão do produtor", D.chk.map(c=>`<tr><td>${c.tipo}</td><td>${c.descricao}</td><td>${c.seguida?"✅":"❌"}</td></tr>`).join(""),["Tipo","Recomendação","Seguiu?"]):""}
+    ${adesaoSection(D)}
+    ${npkAplicadoSection(D)}
     ${sec("Evidências (metadados)", D.evi.map(e=>`<tr><td>${fmtDate(e.capturado_em)}</td><td>${e.latitude!=null?e.latitude+", "+e.longitude:"sem GPS"}</td></tr>`).join(""),["Data/hora","GPS"])}
     ${v.consultor_id===state.user.id?`<button class="btn secondary" onclick="editarVisita('${vid}')" style="margin-bottom:8px">✏️ Editar visita</button>`:''}
     <button class="btn" onclick='exportarPDFVisita("${vid}")'>📄 Exportar PDF</button>
@@ -1233,6 +1370,39 @@ function sec(title,rows,cols){
   if(!rows) rows=""; return `<div class="section-title">${title}</div>
     <div class="card tablewrap"><table><thead><tr>${cols.map(c=>`<th>${c}</th>`).join("")}</tr></thead>
     <tbody>${rows||`<tr><td colspan="${cols.length}" class="hint">—</td></tr>`}</tbody></table></div>`;
+}
+/* Soma do NPK APLICADO (informado na adesão do produtor) de uma lista de checks */
+function npkAplicadoDeChecks(chk){
+  return (chk||[]).filter(c=>c.tipo==='nutricao' && c.seguida)
+    .reduce((a,c)=>({n:a.n+ (+c.aplicado_n_kg_ha||0), p:a.p+ (+c.aplicado_p2o5_kg_ha||0), k:a.k+ (+c.aplicado_k2o_kg_ha||0)}),{n:0,p:0,k:0});
+}
+/* Status legível de uma recomendação (seguiu / desvio / não seguiu) */
+function statusAdesao(c){
+  if(!c.seguida) return '<span class="badge dang">Não seguiu</span>';
+  return c.substituicao ? '<span class="badge warn">Desvio (substituição)</span>' : '<span class="badge ok">Seguiu</span>';
+}
+/* Descrição do que foi aplicado pelo produtor */
+function aplicadoTexto(c){
+  if(!c.seguida) return "—";
+  if(c.tipo==='nutricao'){
+    const npk = `${(+c.aplicado_n_kg_ha||0).toFixed(1)}/${(+c.aplicado_p2o5_kg_ha||0).toFixed(1)}/${(+c.aplicado_k2o_kg_ha||0).toFixed(1)}`;
+    return `${c.aplicado_nome||"—"} — ${c.aplicado_dose??"—"} kg/ha (NPK ${npk})`;
+  }
+  return `${c.aplicado_nome||"—"} — ${c.aplicado_dose??"—"} ${c.aplicado_unidade||""}`;
+}
+/* Seção de Adesão detalhada (recomendação × aplicado × status) */
+function adesaoSection(D){
+  if(!D.chk.length) return "";
+  const rows=D.chk.map(c=>`<tr><td>${c.tipo}</td><td>${c.descricao}</td><td>${aplicadoTexto(c)}</td><td>${statusAdesao(c)}</td></tr>`).join("");
+  return sec("Adesão do produtor (recomendado × aplicado)", rows, ["Tipo","Recomendação","Aplicado pelo produtor","Status"]);
+}
+/* Seção NPK Aplicado (a partir da adesão) — separado do Recomendado */
+function npkAplicadoSection(D){
+  const ap=npkAplicadoDeChecks(D.chk);
+  if(ap.n===0 && ap.p===0 && ap.k===0) return "";
+  return sec("Nutrição — NPK APLICADO pelo produtor (kg/ha: N "+ap.n.toFixed(1)+" · P₂O₅ "+ap.p.toFixed(1)+" · K₂O "+ap.k.toFixed(1)+")",
+    D.chk.filter(c=>c.tipo==='nutricao'&&c.seguida).map(c=>`<tr><td>${c.aplicado_nome||"—"}</td><td>${c.aplicado_dose??"—"}</td><td>${(+c.aplicado_n_kg_ha||0).toFixed(1)}/${(+c.aplicado_p2o5_kg_ha||0).toFixed(1)}/${(+c.aplicado_k2o_kg_ha||0).toFixed(1)}</td><td>${c.substituicao?'<span class="badge warn">substituição</span>':'<span class="badge ok">conforme</span>'}</td></tr>`).join(""),
+    ["Fertilizante aplicado","kg/ha","N/P/K","Aderência"]);
 }
 
 /* =====================================================================
@@ -1339,8 +1509,18 @@ async function gerarPDF(D,pick,fotos=[]){
   }
   if(pick.cpd) t(["Defensivo (CPD)","Dose"], D.cpd.map(c=>[c.cpd_nome,`${c.dose} ${c.unidade}`]));
   if(pick.herb) t(["Herbicida","Dose"], D.herb.map(h=>[h.herb_nome,`${h.dose} ${h.unidade}`]));
-  if(pick.chk) t(["Tipo","Recomendação anterior","Seguiu?"],
-    D.chk.map(c=>[c.tipo,c.descricao,c.seguida?"Sim":"Não"]));
+  if(pick.chk){
+    t(["Tipo","Recomendação anterior","Aplicado pelo produtor","Status"],
+      D.chk.map(c=>[c.tipo,c.descricao,
+        c.seguida?((c.aplicado_nome||"—")+" — "+(c.aplicado_dose??"—")+(c.tipo==='nutricao'?" kg/ha":(" "+(c.aplicado_unidade||"")))):"—",
+        !c.seguida?"Não seguiu":(c.substituicao?"Desvio (substituição)":"Seguiu")]));
+    const ap=npkAplicadoDeChecks(D.chk);
+    if(ap.n||ap.p||ap.k){
+      t([`Fertilizante aplicado (NPK aplicado: N ${ap.n.toFixed(1)} · P₂O₅ ${ap.p.toFixed(1)} · K₂O ${ap.k.toFixed(1)})`,"Dose (kg/ha)","N","P₂O₅","K₂O"],
+        D.chk.filter(c=>c.tipo==='nutricao'&&c.seguida).map(c=>[c.aplicado_nome||"—",c.aplicado_dose??"—",
+          (+c.aplicado_n_kg_ha||0).toFixed(1),(+c.aplicado_p2o5_kg_ha||0).toFixed(1),(+c.aplicado_k2o_kg_ha||0).toFixed(1)]));
+    }
+  }
   if(pick.evi) t(["Data/hora da foto","Latitude","Longitude"],
     D.evi.map(e=>[fmtDate(e.capturado_em),e.latitude??"—",e.longitude??"—"]));
 
@@ -1408,10 +1588,11 @@ async function renderAdmin(){
 }
 
 async function loadAdminData(){
-  const [vis, faz, npk, obs, tf, tc, th, ade, st, kpi] = await Promise.all([
+  const [vis, faz, npk, npkap, obs, tf, tc, th, ade, st, kpi] = await Promise.all([
     sb.from("vw_visitas_base").select("*"),
     sb.from("fazendas").select("*"),
     sb.from("vw_npk_por_fazenda").select("*"),
+    sb.from("vw_npk_aplicado_por_fazenda").select("*"),
     sb.from("vw_obs_ranking").select("*"),
     sb.from("vw_top_fertilizantes").select("*"),
     sb.from("vw_top_cpd").select("*"),
@@ -1424,7 +1605,7 @@ async function loadAdminData(){
   const { data:visRows } = await sb.from("visitas")
     .select("id,inicio_em,tipo_adub,versao,editado_em,consultor_id,fazenda_id,fazendas(display_nome,produtor,fazenda),talhoes(nome,area_ha),consultores(nome)")
     .order("inicio_em",{ascending:false});
-  A.data={vis:vis.data||[], faz:faz.data||[], npk:npk.data||[], obs:obs.data||[],
+  A.data={vis:vis.data||[], faz:faz.data||[], npk:npk.data||[], npkap:(npkap&&npkap.data)||[], obs:obs.data||[],
     tf:tf.data||[], tc:tc.data||[], th:th.data||[], ade:ade.data||[], st:st.data||[], kpi:kpi.data||{},
     visRows: visRows||[]};
   A.filters={consultor:"",fazenda:"",ini:"",fim:"",adub:""};
@@ -1543,14 +1724,16 @@ function drawDash(){
     <div class="section-title">11.3 · Principais recomendações</div>
     <div class="grid2">
       <div class="card"><b>Observações mais frequentes</b><div class="chartbox"><canvas id="chObs"></canvas></div></div>
-      <div class="card"><b>Taxa de adesão do produtor</b><div class="chartbox"><canvas id="chAde"></canvas></div></div>
+      <div class="card"><b>Taxa de adesão do produtor</b>
+        <p class="hint" style="margin:2px 0 6px">Substituição de produto conta como <b>desvio</b> (não é adesão).</p>
+        <div class="chartbox"><canvas id="chAde"></canvas></div></div>
     </div>
     <div class="grid2">
       <div class="card tablewrap"><b>Top fertilizantes</b>${miniTable(d.tf,["item","recomendacoes"],["Item","Rec."])}</div>
       <div class="card tablewrap"><b>Top CPD / Herbicidas</b>${miniTable(d.tc.concat(d.th),["item","recomendacoes"],["Item","Rec."])}</div>
     </div>
 
-    <div class="section-title">11.4 · NPK por fazenda (kg/ha) — média dos lançamentos ≠ 0</div>
+    <div class="section-title">11.4 · NPK RECOMENDADO por fazenda (kg/ha) — média dos lançamentos ≠ 0</div>
     <div class="card">
       <div class="filters">
         <div><label>Visão</label>
@@ -1566,7 +1749,13 @@ function drawDash(){
       <p class="hint">Segure Ctrl/Cmd (ou toque) para escolher várias fazendas. Vazio = todas.</p>
     </div>
     <div id="npk114"></div>
-    <p class="hint">Unidade: kg/ha. A média considera apenas lançamentos com valor &gt; 0 (cada nutriente é contabilizado de forma independente).</p>
+    <p class="hint">Fonte: plano do consultor (recomendado). Unidade: kg/ha. Média considera apenas lançamentos &gt; 0.</p>
+
+    <div class="section-title">11.4 · NPK APLICADO pelo produtor por fazenda (kg/ha)</div>
+    <div class="card"><div class="chartbox"><canvas id="chNPKap"></canvas></div>
+      <p class="hint">Fonte: adesão do produtor (o que foi efetivamente aplicado, incluindo substituições).</p></div>
+    <div class="card tablewrap"><table><thead><tr><th>Fazenda</th><th>N</th><th>P₂O₅</th><th>K₂O</th></tr></thead>
+      <tbody>${tableNPKap(d.npkap)}</tbody></table></div>
     <div class="spacer"></div><div class="spacer"></div>
   `;
 
@@ -1663,6 +1852,16 @@ function renderNPK114(){
       options:chartOpts()});
   }
 }
+/* Tabela do NPK APLICADO por fazenda (vw_npk_aplicado_por_fazenda), respeitando o filtro global de fazenda */
+function tableNPKap(npkap){
+  const rows=(npkap||[]).filter(x=>(!A.filters.fazenda||x.fazenda===A.filters.fazenda));
+  const m={}; rows.forEach(x=>{ if(!m[x.fazenda])m[x.fazenda]={f:x.fazenda,n:0,p:0,k:0};
+    m[x.fazenda].n+= +x.n_kg_ha; m[x.fazenda].p+= +x.p2o5_kg_ha; m[x.fazenda].k+= +x.k2o_kg_ha;});
+  const out=Object.values(m);
+  return out.length?out.map(r=>`<tr><td>${r.f}</td>
+    <td>${r.n.toFixed(1)}</td><td>${r.p.toFixed(1)}</td><td>${r.k.toFixed(1)}</td></tr>`).join("")
+    :`<tr><td colspan="4" class="hint">Sem NPK aplicado registrado na adesão.</td></tr>`;
+}
 function miniTable(rows,keys,heads){
   if(!rows.length) return `<p class="hint">—</p>`;
   return `<table><thead><tr>${heads.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${
@@ -1689,12 +1888,27 @@ function drawCharts(vis,d,npk){
   A.charts.obs=new Chart($("#chObs"),{type:"bar",
     data:{labels:d.obs.map(o=>o.categoria),datasets:[{data:d.obs.map(o=>o.ocorrencias),backgroundColor:soft}]},
     options:{...chartOpts(true),plugins:{legend:{display:false}}}});
-  // adesão
-  const seg=d.ade.reduce((a,x)=>a+ +x.seguidas,0), tot=d.ade.reduce((a,x)=>a+ +x.total,0);
+  // adesão — Efetiva / Desvio (substituição) / Não seguiu
+  const efe=d.ade.reduce((a,x)=>a+ (+x.efetivas||0),0);
+  const des=d.ade.reduce((a,x)=>a+ (+x.desvios||0),0);
+  const tot=d.ade.reduce((a,x)=>a+ (+x.total||0),0);
+  const nao=Math.max(tot-efe-des,0);
   A.charts.ade=new Chart($("#chAde"),{type:"doughnut",
-    data:{labels:["Seguidas","Não seguidas"],datasets:[{data:[seg,Math.max(tot-seg,0)],
-      backgroundColor:[green,"#e2b4ab"]}]},options:{responsive:true,maintainAspectRatio:false}});
-  // NPK (11.4) é renderizado separadamente por renderNPK114()
+    data:{labels:["Adesão efetiva","Desvio (substituição)","Não seguiu"],
+      datasets:[{data:[efe,des,nao],backgroundColor:[green,"#d9822b","#e2b4ab"]}]},
+    options:{responsive:true,maintainAspectRatio:false}});
+  // NPK APLICADO por fazenda (adesão do produtor)
+  const ap=(d.npkap||[]).filter(x=>(!A.filters.fazenda||x.fazenda===A.filters.fazenda));
+  const byA={}; ap.forEach(x=>{if(!byA[x.fazenda])byA[x.fazenda]={n:0,p:0,k:0};
+    byA[x.fazenda].n+= +x.n_kg_ha; byA[x.fazenda].p+= +x.p2o5_kg_ha; byA[x.fazenda].k+= +x.k2o_kg_ha;});
+  const al=Object.keys(byA).slice(0,12);
+  if($("#chNPKap")) A.charts.npkap=new Chart($("#chNPKap"),{type:"bar",
+    data:{labels:al,datasets:[
+      {label:"N",data:al.map(f=>byA[f].n),backgroundColor:"#2d6cdf"},
+      {label:"P₂O₅",data:al.map(f=>byA[f].p),backgroundColor:"#8e44ad"},
+      {label:"K₂O",data:al.map(f=>byA[f].k),backgroundColor:"#e08e0b"}]},
+    options:chartOpts()});
+  // NPK RECOMENDADO (11.4) é renderizado separadamente por renderNPK114()
 }
 function chartOpts(horizontalHint){
   return {responsive:true,maintainAspectRatio:false,
@@ -1746,8 +1960,11 @@ function exportDashXLSX(){
       Ultima_visita:s.ultima_visita?fmtDay(s.ultima_visita):"nunca",Dias_sem_visita:s.dias_sem_visita})),
     ),"Fazendas_status");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
-    d.npk.map(x=>({Fazenda:x.fazenda,Adubacao:x.tipo_adub,Ano_mes:x.ano_mes,
-      N_kg_ha:x.n_kg_ha,P2O5_kg_ha:x.p2o5_kg_ha,K2O_kg_ha:x.k2o_kg_ha}))),"NPK");
+    d.npk.map(x=>({Fazenda:x.fazenda,Adubacao:adubLabel(x.tipo_adub),Ano_mes:x.ano_mes,
+      N_kg_ha:x.n_kg_ha,P2O5_kg_ha:x.p2o5_kg_ha,K2O_kg_ha:x.k2o_kg_ha}))),"NPK_Recomendado");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+    (d.npkap||[]).map(x=>({Fazenda:x.fazenda,Ano_mes:x.ano_mes||"",
+      N_kg_ha:x.n_kg_ha,P2O5_kg_ha:x.p2o5_kg_ha,K2O_kg_ha:x.k2o_kg_ha}))),"NPK_Aplicado");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
     d.tf.map(x=>({Item:x.item,Recomendacoes:x.recomendacoes,Dose_total_kg_ha:x.dose_total_kg_ha}))),"Top_Fertilizantes");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.ade),"Adesao");
@@ -1857,7 +2074,7 @@ async function batchExport(kind){
 async function exportVisitasXLSXConsolidado(vids){
   toast(`Consolidando ${vids.length} relatório(s) em um único Excel…`,"ok");
   const datas = await Promise.all(vids.map(v=>carregarVisitaCompleta(v)));
-  const cab=[], obs=[], nut=[], cpd=[], herb=[], ade=[], evi=[];
+  const cab=[], obs=[], nut=[], nutAp=[], cpd=[], herb=[], ade=[], evi=[];
   datas.forEach(D=>{
     const v=D.v; const ref=nomeBaseVisita(v);
     const meta={Relatorio:ref, Fazenda:v.fazendas.display_nome,
@@ -1871,15 +2088,22 @@ async function exportVisitasXLSXConsolidado(vids){
     D.nut.forEach(n=>nut.push({...meta,Tipo_adubacao:adubLabel(n.tipo_adub||v.tipo_adub),
       Fertilizante:n.fert_nome,Dose_kg_ha:n.dose_kg_ha,
       N_kg_ha:+n.n_kg_ha,P2O5_kg_ha:+n.p2o5_kg_ha,K2O_kg_ha:+n.k2o_kg_ha}));
+    D.chk.filter(c=>c.tipo==='nutricao'&&c.seguida).forEach(c=>nutAp.push({...meta,
+      Fertilizante_aplicado:c.aplicado_nome||"",Dose_kg_ha:c.aplicado_dose??"",
+      N_kg_ha:+c.aplicado_n_kg_ha||0,P2O5_kg_ha:+c.aplicado_p2o5_kg_ha||0,K2O_kg_ha:+c.aplicado_k2o_kg_ha||0,
+      Substituicao:c.substituicao?"Sim":"Nao"}));
     D.cpd.forEach(c=>cpd.push({...meta,Defensivo:c.cpd_nome,Dose:c.dose,Unidade:c.unidade}));
     D.herb.forEach(h=>herb.push({...meta,Herbicida:h.herb_nome,Dose:h.dose,Unidade:h.unidade}));
-    D.chk.forEach(c=>ade.push({...meta,Tipo:c.tipo,Recomendacao:c.descricao,Seguiu:c.seguida?"Sim":"Nao"}));
+    D.chk.forEach(c=>ade.push({...meta,Tipo:c.tipo,Recomendacao:c.descricao,
+      Seguiu:c.seguida?"Sim":"Nao",Substituicao:c.substituicao?"Sim":"Nao",
+      Adesao_efetiva:(c.seguida&&!c.substituicao)?"Sim":"Nao",
+      Aplicado:c.seguida?(c.aplicado_nome||""):"",Dose_aplicada:c.seguida?(c.aplicado_dose??""):"",Unidade:c.seguida?(c.aplicado_unidade||""):""}));
     D.evi.forEach(e=>evi.push({...meta,DataHora_foto:fmtDate(e.capturado_em),
       Latitude:e.latitude,Longitude:e.longitude}));
   });
   const wb=XLSX.utils.book_new();
   const add=(name,rows)=>XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length?rows:[{}]), name);
-  add("Cabecalhos",cab); add("Observacoes",obs); add("Nutricao",nut);
+  add("Cabecalhos",cab); add("Observacoes",obs); add("Nutricao_Recomendada",nut); add("Nutricao_Aplicada",nutAp);
   add("CPD",cpd); add("Herbicidas",herb); add("Adesao",ade); add("Evidencias",evi);
   const dt=new Date(); const aamm=String(dt.getFullYear()).slice(2)+String(dt.getMonth()+1).padStart(2,"0");
   XLSX.writeFile(wb,`${aamm}_Relatorios_Consolidado_${vids.length}visitas.xlsx`);
@@ -1911,11 +2135,18 @@ async function exportVisitaXLSX(vid){
     {Campo:"Editado_em",Valor:v.editado_em?fmtDate(v.editado_em):"—"},
   ]);
   add("Observacoes", D.obs.map(o=>({Categoria:o.categoria,Observado:o.observado||"",Acao:o.acao||""})));
-  add("Nutricao", D.nut.map(n=>({Tipo_adubacao:adubLabel(n.tipo_adub||v.tipo_adub),Fertilizante:n.fert_nome,Dose_kg_ha:n.dose_kg_ha,
+  add("Nutricao_Recomendada", D.nut.map(n=>({Tipo_adubacao:adubLabel(n.tipo_adub||v.tipo_adub),Fertilizante:n.fert_nome,Dose_kg_ha:n.dose_kg_ha,
     N_kg_ha:+n.n_kg_ha,P2O5_kg_ha:+n.p2o5_kg_ha,K2O_kg_ha:+n.k2o_kg_ha})));
+  add("Nutricao_Aplicada", D.chk.filter(c=>c.tipo==='nutricao'&&c.seguida).map(c=>({
+    Fertilizante_aplicado:c.aplicado_nome||"",Dose_kg_ha:c.aplicado_dose??"",
+    N_kg_ha:+c.aplicado_n_kg_ha||0,P2O5_kg_ha:+c.aplicado_p2o5_kg_ha||0,K2O_kg_ha:+c.aplicado_k2o_kg_ha||0,
+    Substituicao:c.substituicao?"Sim":"Nao"})));
   add("CPD", D.cpd.map(c=>({Defensivo:c.cpd_nome,Dose:c.dose,Unidade:c.unidade})));
   add("Herbicidas", D.herb.map(h=>({Herbicida:h.herb_nome,Dose:h.dose,Unidade:h.unidade})));
-  add("Adesao", D.chk.map(c=>({Tipo:c.tipo,Recomendacao:c.descricao,Seguiu:c.seguida?"Sim":"Nao"})));
+  add("Adesao", D.chk.map(c=>({Tipo:c.tipo,Recomendacao:c.descricao,
+    Seguiu:c.seguida?"Sim":"Nao",Substituicao:c.substituicao?"Sim":"Nao",
+    Adesao_efetiva:(c.seguida&&!c.substituicao)?"Sim":"Nao",
+    Aplicado:c.seguida?(c.aplicado_nome||""):"",Dose_aplicada:c.seguida?(c.aplicado_dose??""):"",Unidade:c.seguida?(c.aplicado_unidade||""):""})));
   add("Evidencias", D.evi.map(e=>({DataHora:fmtDate(e.capturado_em),Latitude:e.latitude,Longitude:e.longitude})));
   XLSX.writeFile(wb, nomeBaseVisita(v)+".xlsx");
   toast("XLSX da visita exportado","ok");
@@ -1936,11 +2167,12 @@ async function adminVerVisita(vid){
       <button class="btn small secondary" onclick="this.closest('div[style]').parentNode.remove()">Fechar</button>
     </div>
     ${sec("Observações", D.obs.map(o=>`<tr><td>${o.categoria}</td><td>${o.observado||"—"}</td><td>${o.acao||"—"}</td></tr>`).join(""), ["Categoria","Observado","Ação"])}
-    ${sec("Nutrição (NPK kg/ha: N "+npk.n.toFixed(1)+" · P₂O₅ "+npk.p.toFixed(1)+" · K₂O "+npk.k.toFixed(1)+")",
+    ${sec("Nutrição — NPK RECOMENDADO (kg/ha: N "+npk.n.toFixed(1)+" · P₂O₅ "+npk.p.toFixed(1)+" · K₂O "+npk.k.toFixed(1)+")",
        D.nut.map(n=>`<tr><td>${adubLabel(n.tipo_adub)}</td><td>${n.fert_nome}</td><td>${n.dose_kg_ha}</td><td>${(+n.n_kg_ha).toFixed(1)}/${(+n.p2o5_kg_ha).toFixed(1)}/${(+n.k2o_kg_ha).toFixed(1)}</td></tr>`).join(""), ["Adub.","Fertilizante","kg/ha","N/P/K"])}
     ${sec("CPD", D.cpd.map(c=>`<tr><td>${c.cpd_nome}</td><td>${c.dose} ${c.unidade}</td></tr>`).join(""), ["Defensivo","Dose"])}
     ${sec("Herbicidas", D.herb.map(h=>`<tr><td>${h.herb_nome}</td><td>${h.dose} ${h.unidade}</td></tr>`).join(""), ["Herbicida","Dose"])}
-    ${D.chk.length?sec("Adesão do produtor", D.chk.map(c=>`<tr><td>${c.tipo}</td><td>${c.descricao}</td><td>${c.seguida?"✅":"❌"}</td></tr>`).join(""),["Tipo","Recomendação","Seguiu?"]):""}
+    ${adesaoSection(D)}
+    ${npkAplicadoSection(D)}
     ${sec("Evidências (metadados)", D.evi.map(e=>`<tr><td>${fmtDate(e.capturado_em)}</td><td>${e.latitude!=null?e.latitude+", "+e.longitude:"sem GPS"}</td></tr>`).join(""),["Data/hora","GPS"])}
     <div class="row">
       <button class="btn" onclick="exportVisitaPDF('${vid}')">📄 Baixar PDF</button>
