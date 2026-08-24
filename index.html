@@ -75,7 +75,7 @@ label{display:block; font-weight:600; font-size:.9rem; margin:10px 0 4px; color:
 
 .check{display:flex; align-items:flex-start; gap:10px; padding:10px 12px; border:1px solid var(--line);
   border-radius:10px; background:#fff; margin:6px 0}
-.check input{width:20px; height:20px; flex:0 0 auto; margin-top:2px}
+.check input[type="checkbox"]{width:20px; height:20px; flex:0 0 auto; margin-top:2px}
 .check .lbl{flex:1}
 
 .chips{display:flex; flex-wrap:wrap; gap:8px}
@@ -815,7 +815,7 @@ async function iniciarVisita(talhao, existing=null){
       <div id="obsDetails"></div>
     </div>
 
-    <div class="section-title">Manejo da lavoura</div>
+    <div class="section-title">Recomendações Técnicas — Manejo da Lavoura</div>
     <div class="card">
       <label>Tipo de adubação <span class="hint" style="font-weight:400">(opcional — pode marcar as duas)</span></label>
       <div class="chips">
