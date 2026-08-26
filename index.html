@@ -1359,8 +1359,11 @@ async function verVisita(vid){
     ${sec("Observações", D.obs.map(o=>`<tr><td>${o.categoria}</td><td>${o.observado||"—"}</td><td>${o.acao||"—"}</td></tr>`).join(""), ["Categoria","Observado","Ação"])}
     ${sec("Nutrição — NPK RECOMENDADO (kg/ha: N "+npk.n.toFixed(1)+" · P₂O₅ "+npk.p.toFixed(1)+" · K₂O "+npk.k.toFixed(1)+")",
        D.nut.map(n=>`<tr><td>${adubLabel(n.tipo_adub)}</td><td>${n.fert_nome}</td><td>${n.dose_kg_ha}</td><td>${(+n.n_kg_ha).toFixed(1)}/${(+n.p2o5_kg_ha).toFixed(1)}/${(+n.k2o_kg_ha).toFixed(1)}</td></tr>`).join(""), ["Adub.","Fertilizante","kg/ha","N/P/K"])}
+    ${obsHtml("Observações da nutrição", v.obs_nutricao)}
     ${sec("CPD", D.cpd.map(c=>`<tr><td>${c.cpd_nome}</td><td>${c.dose} ${c.unidade}</td></tr>`).join(""), ["Defensivo","Dose"])}
+    ${obsHtml("Observações CPD", v.obs_cpd)}
     ${sec("Herbicidas", D.herb.map(h=>`<tr><td>${h.herb_nome}</td><td>${h.dose} ${h.unidade}</td></tr>`).join(""), ["Herbicida","Dose"])}
+    ${obsHtml("Observações herbicidas", v.obs_herb)}
     ${adesaoSection(D)}
     ${npkAplicadoSection(D)}
     ${sec("Evidências (metadados)", D.evi.map(e=>`<tr><td>${fmtDate(e.capturado_em)}</td><td>${e.latitude!=null?e.latitude+", "+e.longitude:"sem GPS"}</td></tr>`).join(""),["Data/hora","GPS"])}
@@ -1373,6 +1376,13 @@ function sec(title,rows,cols){
   if(!rows) rows=""; return `<div class="section-title">${title}</div>
     <div class="card tablewrap"><table><thead><tr>${cols.map(c=>`<th>${c}</th>`).join("")}</tr></thead>
     <tbody>${rows||`<tr><td colspan="${cols.length}" class="hint">—</td></tr>`}</tbody></table></div>`;
+}
+/* Bloco de observação livre (nutrição/CPD/herbicidas) — só renderiza se houver texto */
+function obsHtml(label,txt){
+  if(txt==null || !String(txt).trim()) return "";
+  return `<div class="card" style="padding:10px 14px;margin-top:-6px">
+    <div class="hint" style="font-weight:600;text-transform:uppercase;letter-spacing:.4px">${label}</div>
+    <div style="white-space:pre-wrap;margin-top:2px">${String(txt).trim()}</div></div>`;
 }
 /* Soma do NPK APLICADO (informado na adesão do produtor) de uma lista de checks */
 function npkAplicadoDeChecks(chk){
@@ -1512,6 +1522,15 @@ async function gerarPDF(D,pick,fotos=[]){
     doc.setFillColor(27,58,91); doc.rect(40,y-6,4,h,"F");
     doc.setFontSize(8.5); doc.setTextColor(27,58,91);
     doc.text(lines,52,y+6); doc.setTextColor(15,39,64); y+=h+8; };
+  // Linha de observação livre (rótulo + texto), com quebra automática e paginação
+  const obsText=(label,txt)=>{ if(txt==null || !String(txt).trim()) return;
+    const pageH=doc.internal.pageSize.getHeight();
+    const lines=doc.splitTextToSize(`${label}: ${String(txt).trim()}`, W-80);
+    const h=lines.length*11+6;
+    if(y > pageH-h-20){ doc.addPage(); y=48; }
+    doc.setFontSize(8.5); doc.setTextColor(84,99,122); doc.setFont(undefined,"italic");
+    doc.text(lines,40,y+4); doc.setFont(undefined,"normal");
+    doc.setTextColor(15,39,64); y+=h+8; };
 
   // 1) OBSERVAÇÕES DA VISITA
   if(pick.obs){ banner("Observações da visita");
@@ -1535,25 +1554,29 @@ async function gerarPDF(D,pick,fotos=[]){
   }
 
   // 3) RECOMENDAÇÃO TÉCNICA — MANEJO DA LAVOURA (da visita atual)
-  if(pick.nut && D.nut.length){
+  // Observações livres de cada bloco (nutrição/CPD/herbicidas) também são impressas.
+  const hasNut  = pick.nut  && (D.nut.length  || (v.obs_nutricao && String(v.obs_nutricao).trim()));
+  const hasCpd  = pick.cpd  && (D.cpd.length  || (v.obs_cpd      && String(v.obs_cpd).trim()));
+  const hasHerb = pick.herb && (D.herb.length || (v.obs_herb     && String(v.obs_herb).trim()));
+  if(hasNut || hasCpd || hasHerb){
     banner("Recomendação Técnica — Manejo da Lavoura");
-    notebox("RECOMENDAÇÃO TÉCNICA — Estes dados são as recomendações do manejo da lavoura desta visita e devem ser comparadas, na próxima visita, com o que foi efetivamente aplicado pelo produtor.");
-    const groups={};
-    D.nut.forEach(n=>{ const k=n.tipo_adub||v.tipo_adub||"—"; (groups[k]=groups[k]||[]).push(n); });
-    Object.keys(groups).forEach(k=>{
-      const rows=groups[k];
-      const npk=rows.reduce((a,n)=>({n:a.n+ +n.n_kg_ha,p:a.p+ +n.p2o5_kg_ha,k:a.k+ +n.k2o_kg_ha}),{n:0,p:0,k:0});
-      t([`Fertilizante recomendado — ${adubLabel(k)}`,"Dose (kg/ha)","N","P₂O₅","K₂O"],
-        rows.map(n=>[n.fert_nome,n.dose_kg_ha,(+n.n_kg_ha).toFixed(1),(+n.p2o5_kg_ha).toFixed(1),(+n.k2o_kg_ha).toFixed(1)])
-          .concat([["TOTAL","",npk.n.toFixed(1),npk.p.toFixed(1),npk.k.toFixed(1)]]));
-    });
+    if(pick.nut && D.nut.length){
+      notebox("RECOMENDAÇÃO TÉCNICA — Estes dados são as recomendações do manejo da lavoura desta visita e devem ser comparadas, na próxima visita, com o que foi efetivamente aplicado pelo produtor.");
+      const groups={};
+      D.nut.forEach(n=>{ const k=n.tipo_adub||v.tipo_adub||"—"; (groups[k]=groups[k]||[]).push(n); });
+      Object.keys(groups).forEach(k=>{
+        const rows=groups[k];
+        const npk=rows.reduce((a,n)=>({n:a.n+ +n.n_kg_ha,p:a.p+ +n.p2o5_kg_ha,k:a.k+ +n.k2o_kg_ha}),{n:0,p:0,k:0});
+        t([`Fertilizante recomendado — ${adubLabel(k)}`,"Dose (kg/ha)","N","P₂O₅","K₂O"],
+          rows.map(n=>[n.fert_nome,n.dose_kg_ha,(+n.n_kg_ha).toFixed(1),(+n.p2o5_kg_ha).toFixed(1),(+n.k2o_kg_ha).toFixed(1)])
+            .concat([["TOTAL","",npk.n.toFixed(1),npk.p.toFixed(1),npk.k.toFixed(1)]]));
+      });
+    }
+    if(hasNut)  obsText("Observações da nutrição", v.obs_nutricao);
     if(pick.cpd && D.cpd.length) t(["CPD recomendado","Dose","Unidade"], D.cpd.map(c=>[c.cpd_nome,c.dose,c.unidade]));
+    if(hasCpd)  obsText("Observações CPD", v.obs_cpd);
     if(pick.herb && D.herb.length) t(["Herbicida recomendado","Dose","Unidade"], D.herb.map(h=>[h.herb_nome,h.dose,h.unidade]));
-  } else {
-    // Se não houver nutrição mas houver CPD/Herbicida, ainda exibe sob a mesma seção
-    if((pick.cpd && D.cpd.length) || (pick.herb && D.herb.length)) banner("Recomendação Técnica — Manejo da Lavoura");
-    if(pick.cpd && D.cpd.length) t(["CPD recomendado","Dose","Unidade"], D.cpd.map(c=>[c.cpd_nome,c.dose,c.unidade]));
-    if(pick.herb && D.herb.length) t(["Herbicida recomendado","Dose","Unidade"], D.herb.map(h=>[h.herb_nome,h.dose,h.unidade]));
+    if(hasHerb) obsText("Observações herbicidas", v.obs_herb);
   }
   // Metadados das evidências NÃO entram como tabela — aparecem apenas como legenda das fotos.
 
@@ -2115,7 +2138,8 @@ async function exportVisitasXLSXConsolidado(vids){
       Talhao:(v.talhoes?.nome||"—")+" ("+(v.talhoes?.area_ha??"—")+" ha)",
       Responsavel:v.responsavel||"—", Motivo:v.motivo||"—",
       Tipo_adubacao:adubLabel(v.tipo_adub), Versao:"v"+(v.versao||1),
-      Editado_em:v.editado_em?fmtDate(v.editado_em):"—"});
+      Editado_em:v.editado_em?fmtDate(v.editado_em):"—",
+      Obs_nutricao:v.obs_nutricao||"", Obs_cpd:v.obs_cpd||"", Obs_herb:v.obs_herb||""});
     D.obs.forEach(o=>obs.push({...meta,Categoria:o.categoria,Observado:o.observado||"",Acao:o.acao||""}));
     D.nut.forEach(n=>nut.push({...meta,Tipo_adubacao:adubLabel(n.tipo_adub||v.tipo_adub),
       Fertilizante:n.fert_nome,Dose_kg_ha:n.dose_kg_ha,
@@ -2165,6 +2189,9 @@ async function exportVisitaXLSX(vid){
     {Campo:"Tipo_adubacao",Valor:adubLabel(v.tipo_adub)},
     {Campo:"Versao",Valor:"v"+(v.versao||1)},
     {Campo:"Editado_em",Valor:v.editado_em?fmtDate(v.editado_em):"—"},
+    {Campo:"Obs_nutricao",Valor:v.obs_nutricao||"—"},
+    {Campo:"Obs_cpd",Valor:v.obs_cpd||"—"},
+    {Campo:"Obs_herb",Valor:v.obs_herb||"—"},
   ]);
   add("Observacoes", D.obs.map(o=>({Categoria:o.categoria,Observado:o.observado||"",Acao:o.acao||""})));
   add("Nutricao_Recomendada", D.nut.map(n=>({Tipo_adubacao:adubLabel(n.tipo_adub||v.tipo_adub),Fertilizante:n.fert_nome,Dose_kg_ha:n.dose_kg_ha,
@@ -2201,8 +2228,11 @@ async function adminVerVisita(vid){
     ${sec("Observações", D.obs.map(o=>`<tr><td>${o.categoria}</td><td>${o.observado||"—"}</td><td>${o.acao||"—"}</td></tr>`).join(""), ["Categoria","Observado","Ação"])}
     ${sec("Nutrição — NPK RECOMENDADO (kg/ha: N "+npk.n.toFixed(1)+" · P₂O₅ "+npk.p.toFixed(1)+" · K₂O "+npk.k.toFixed(1)+")",
        D.nut.map(n=>`<tr><td>${adubLabel(n.tipo_adub)}</td><td>${n.fert_nome}</td><td>${n.dose_kg_ha}</td><td>${(+n.n_kg_ha).toFixed(1)}/${(+n.p2o5_kg_ha).toFixed(1)}/${(+n.k2o_kg_ha).toFixed(1)}</td></tr>`).join(""), ["Adub.","Fertilizante","kg/ha","N/P/K"])}
+    ${obsHtml("Observações da nutrição", v.obs_nutricao)}
     ${sec("CPD", D.cpd.map(c=>`<tr><td>${c.cpd_nome}</td><td>${c.dose} ${c.unidade}</td></tr>`).join(""), ["Defensivo","Dose"])}
+    ${obsHtml("Observações CPD", v.obs_cpd)}
     ${sec("Herbicidas", D.herb.map(h=>`<tr><td>${h.herb_nome}</td><td>${h.dose} ${h.unidade}</td></tr>`).join(""), ["Herbicida","Dose"])}
+    ${obsHtml("Observações herbicidas", v.obs_herb)}
     ${adesaoSection(D)}
     ${npkAplicadoSection(D)}
     ${sec("Evidências (metadados)", D.evi.map(e=>`<tr><td>${fmtDate(e.capturado_em)}</td><td>${e.latitude!=null?e.latitude+", "+e.longitude:"sem GPS"}</td></tr>`).join(""),["Data/hora","GPS"])}
