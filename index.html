@@ -1748,6 +1748,13 @@ function drawDash(){
     && (!A.filters.fim||x.ano_mes<=A.filters.fim.slice(0,7)));
   A._npk = npk; // base para o painel 11.4 (visão geral / por fazenda)
 
+  // NPK APLICADO filtrado (mesma base do Recomendado) — o painel 11.4 Aplicado
+  // passa a respeitar a MESMA visão (por fazenda / média geral) e filtro de fazendas.
+  const npkap=(d.npkap||[]).filter(x=>(!A.filters.fazenda||x.fazenda===A.filters.fazenda)
+    && (!A.filters.ini||!x.ano_mes||String(x.ano_mes)>=A.filters.ini.slice(0,7))
+    && (!A.filters.fim||!x.ano_mes||String(x.ano_mes)<=A.filters.fim.slice(0,7)));
+  A._npkap = npkap;
+
   $("#dashContent").innerHTML=`
     <div class="section-title">Visão geral</div>
     <div class="kpis">
@@ -1788,7 +1795,7 @@ function drawDash(){
       <div class="card tablewrap"><b>Top CPD / Herbicidas</b>${miniTable(d.tc.concat(d.th),["item","recomendacoes"],["Item","Rec."])}</div>
     </div>
 
-    <div class="section-title">11.4 · NPK RECOMENDADO por fazenda (kg/ha) — média dos lançamentos ≠ 0</div>
+    <div class="section-title">11.4 · NPK — Recomendado × Aplicado (kg/ha) — média dos lançamentos ≠ 0</div>
     <div class="card">
       <div class="filters">
         <div><label>Visão</label>
@@ -1801,16 +1808,16 @@ function drawDash(){
             [...new Set(npk.map(x=>x.fazenda))].sort().map(f=>`<option>${f}</option>`).join("")
           }</select></div>
       </div>
-      <p class="hint">Segure Ctrl/Cmd (ou toque) para escolher várias fazendas. Vazio = todas.</p>
+      <p class="hint">Segure Ctrl/Cmd (ou toque) para escolher várias fazendas. Vazio = todas. A visão selecionada vale para <b>Recomendado</b> e <b>Aplicado</b>.</p>
     </div>
+
+    <div class="section-title">NPK RECOMENDADO (plano do consultor)</div>
     <div id="npk114"></div>
     <p class="hint">Fonte: plano do consultor (recomendado). Unidade: kg/ha. Média considera apenas lançamentos &gt; 0.</p>
 
-    <div class="section-title">11.4 · NPK APLICADO pelo produtor por fazenda (kg/ha)</div>
-    <div class="card"><div class="chartbox"><canvas id="chNPKap"></canvas></div>
-      <p class="hint">Fonte: adesão do produtor (o que foi efetivamente aplicado, incluindo substituições).</p></div>
-    <div class="card tablewrap"><table><thead><tr><th>Fazenda</th><th>N</th><th>P₂O₅</th><th>K₂O</th></tr></thead>
-      <tbody>${tableNPKap(d.npkap)}</tbody></table></div>
+    <div class="section-title">NPK APLICADO pelo produtor (adesão)</div>
+    <div id="npkAp114"></div>
+    <p class="hint">Fonte: adesão do produtor (o que foi efetivamente aplicado, incluindo substituições). Segue a mesma visão do Recomendado.</p>
     <div class="spacer"></div><div class="spacer"></div>
   `;
 
@@ -1860,6 +1867,17 @@ function npkAggregate(rows, byFarm){
     return {n:o.nC?o.nS/o.nC:0, p:o.pC?o.pS/o.pC:0, k:o.kC?o.kS/o.kC:0};
   }
 }
+/* Média dos lançamentos ≠ 0 agregada SOMENTE por fazenda (o Aplicado não tem
+   tipo de adubação). Mesma regra do Recomendado, garantindo comparabilidade. */
+function npkAggregateFarmOnly(rows){
+  const m={};
+  rows.forEach(x=>{ const f=x.fazenda;
+    if(!m[f]) m[f]={f, nS:0,nC:0,pS:0,pC:0,kS:0,kC:0};
+    const o=m[f], vn=+x.n_kg_ha, vp=+x.p2o5_kg_ha, vk=+x.k2o_kg_ha;
+    if(vn>0){o.nS+=vn;o.nC++;} if(vp>0){o.pS+=vp;o.pC++;} if(vk>0){o.kS+=vk;o.kC++;} });
+  return Object.values(m).map(r=>({f:r.f,
+    n:r.nC?r.nS/r.nC:0, p:r.pC?r.pS/r.pC:0, k:r.kC?r.kS/r.kC:0}));
+}
 /* Renderiza o painel 11.4 conforme a visão (por fazenda / média geral) e o
    filtro de fazendas do próprio painel. Base: A._npk (já filtrado no global). */
 function renderNPK114(){
@@ -1906,16 +1924,59 @@ function renderNPK114(){
         {label:"K₂O",data:fl.map(f=>byF[f].k),backgroundColor:"#e08e0b"}]},
       options:chartOpts()});
   }
+  // O painel Aplicado acompanha a mesma visão/seleção de fazendas do Recomendado.
+  renderNPKap114();
 }
-/* Tabela do NPK APLICADO por fazenda (vw_npk_aplicado_por_fazenda), respeitando o filtro global de fazenda */
-function tableNPKap(npkap){
-  const rows=(npkap||[]).filter(x=>(!A.filters.fazenda||x.fazenda===A.filters.fazenda));
-  const m={}; rows.forEach(x=>{ if(!m[x.fazenda])m[x.fazenda]={f:x.fazenda,n:0,p:0,k:0};
-    m[x.fazenda].n+= +x.n_kg_ha; m[x.fazenda].p+= +x.p2o5_kg_ha; m[x.fazenda].k+= +x.k2o_kg_ha;});
-  const out=Object.values(m);
-  return out.length?out.map(r=>`<tr><td>${r.f}</td>
-    <td>${r.n.toFixed(1)}</td><td>${r.p.toFixed(1)}</td><td>${r.k.toFixed(1)}</td></tr>`).join("")
-    :`<tr><td colspan="4" class="hint">Sem NPK aplicado registrado na adesão.</td></tr>`;
+/* Painel 11.4 · NPK APLICADO — espelha a visão (por fazenda / média geral) e o
+   filtro de fazendas do Recomendado. Na média geral, mostra também "% do
+   recomendado" (quanto o produtor de fato segue). Base: A._npkap. */
+function renderNPKap114(){
+  const cont=$("#npkAp114"); if(!cont) return;
+  const view=$("#npkView")?.value||"fazenda";
+  const fsel=$("#npkFaz")?[...$("#npkFaz").selectedOptions].map(o=>o.value):[];
+  let rows=(A._npkap||[]);
+  if(fsel.length) rows=rows.filter(x=>fsel.includes(x.fazenda));
+  try{ A.charts.npkap?.destroy(); }catch(e){}
+
+  if(view==="geral"){
+    const g=npkAggregate(rows,false);
+    // recomendado na mesma base (para calcular a adesão % em cada nutriente)
+    let recRows=(A._npk||[]); if(fsel.length) recRows=recRows.filter(x=>fsel.includes(x.fazenda));
+    const gr=npkAggregate(recRows,false);
+    const pct=(a,b)=> (b>0 ? (a/b*100) : null);
+    const fmtPct=v=> (v==null ? "—" : v.toFixed(0)+"%");
+    cont.innerHTML=`
+      <div class="card"><div class="chartbox"><canvas id="chNPKap"></canvas></div></div>
+      <div class="kpis">
+        <div class="kpi"><div class="v">${g.n.toFixed(1)}</div><div class="l">N médio aplicado (kg/ha)</div><div class="d">${fmtPct(pct(g.n,gr.n))} do recomendado</div></div>
+        <div class="kpi"><div class="v">${g.p.toFixed(1)}</div><div class="l">P₂O₅ médio aplicado (kg/ha)</div><div class="d">${fmtPct(pct(g.p,gr.p))} do recomendado</div></div>
+        <div class="kpi"><div class="v">${g.k.toFixed(1)}</div><div class="l">K₂O médio aplicado (kg/ha)</div><div class="d">${fmtPct(pct(g.k,gr.k))} do recomendado</div></div>
+      </div>
+      <p class="hint">${fsel.length?`Média geral de ${fsel.length} fazenda(s) selecionada(s).`:"Média geral de todas as fazendas do filtro."} “% do recomendado” indica o quanto os produtores seguem a recomendação.</p>`;
+    A.charts.npkap=new Chart($("#chNPKap"),{type:"bar",
+      data:{labels:["N","P₂O₅","K₂O"],datasets:[
+        {label:"Recomendado (kg/ha)",data:[gr.n,gr.p,gr.k],backgroundColor:"#9db4cd"},
+        {label:"Aplicado (kg/ha)",data:[g.n,g.p,g.k],backgroundColor:["#2d6cdf","#8e44ad","#e08e0b"]}]},
+      options:chartOpts()});
+  } else {
+    const rr=npkAggregateFarmOnly(rows);
+    const tbody = rr.length
+      ? rr.map(r=>`<tr><td>${r.f}</td><td>${r.n.toFixed(1)}</td><td>${r.p.toFixed(1)}</td><td>${r.k.toFixed(1)}</td></tr>`).join("")
+      : `<tr><td colspan="4" class="hint">Sem NPK aplicado registrado na adesão.</td></tr>`;
+    cont.innerHTML=`
+      <div class="card"><div class="chartbox"><canvas id="chNPKap"></canvas></div></div>
+      <div class="card tablewrap"><table>
+        <thead><tr><th>Fazenda</th><th>N</th><th>P₂O₅</th><th>K₂O</th></tr></thead>
+        <tbody>${tbody}</tbody></table></div>`;
+    const fl=rr.map(r=>r.f).slice(0,12);
+    const byF={}; rr.forEach(r=>byF[r.f]=r);
+    A.charts.npkap=new Chart($("#chNPKap"),{type:"bar",
+      data:{labels:fl,datasets:[
+        {label:"N",data:fl.map(f=>byF[f].n),backgroundColor:"#2d6cdf"},
+        {label:"P₂O₅",data:fl.map(f=>byF[f].p),backgroundColor:"#8e44ad"},
+        {label:"K₂O",data:fl.map(f=>byF[f].k),backgroundColor:"#e08e0b"}]},
+      options:chartOpts()});
+  }
 }
 function miniTable(rows,keys,heads){
   if(!rows.length) return `<p class="hint">—</p>`;
@@ -1952,18 +2013,8 @@ function drawCharts(vis,d,npk){
     data:{labels:["Adesão efetiva","Desvio (substituição)","Não seguiu"],
       datasets:[{data:[efe,des,nao],backgroundColor:[green,"#d9822b","#e2b4ab"]}]},
     options:{responsive:true,maintainAspectRatio:false}});
-  // NPK APLICADO por fazenda (adesão do produtor)
-  const ap=(d.npkap||[]).filter(x=>(!A.filters.fazenda||x.fazenda===A.filters.fazenda));
-  const byA={}; ap.forEach(x=>{if(!byA[x.fazenda])byA[x.fazenda]={n:0,p:0,k:0};
-    byA[x.fazenda].n+= +x.n_kg_ha; byA[x.fazenda].p+= +x.p2o5_kg_ha; byA[x.fazenda].k+= +x.k2o_kg_ha;});
-  const al=Object.keys(byA).slice(0,12);
-  if($("#chNPKap")) A.charts.npkap=new Chart($("#chNPKap"),{type:"bar",
-    data:{labels:al,datasets:[
-      {label:"N",data:al.map(f=>byA[f].n),backgroundColor:"#2d6cdf"},
-      {label:"P₂O₅",data:al.map(f=>byA[f].p),backgroundColor:"#8e44ad"},
-      {label:"K₂O",data:al.map(f=>byA[f].k),backgroundColor:"#e08e0b"}]},
-    options:chartOpts()});
-  // NPK RECOMENDADO (11.4) é renderizado separadamente por renderNPK114()
+  // NPK RECOMENDADO e APLICADO (11.4) são renderizados por renderNPK114()/renderNPKap114(),
+  // pois ambos passam a respeitar a mesma visão (por fazenda / média geral).
 }
 function chartOpts(horizontalHint){
   return {responsive:true,maintainAspectRatio:false,
