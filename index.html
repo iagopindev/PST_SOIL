@@ -899,7 +899,21 @@ function toggleObs(btn){
   }
   syncObsDetails();
 }
+/* Preserva o que já foi digitado nas caixas de observação, gravando no draft
+   ANTES de reconstruir o HTML — evita a perda ao (des)marcar outra categoria. */
+function captureObsDetails(){
+  const cont=$("#obsDetails"); if(!cont) return;
+  $$("#obsDetails [data-obs-obs]").forEach(t=>{
+    const cat=t.dataset.obsObs;
+    const obsVal=t.value||null;
+    const acaoVal=$(`#obsDetails [data-obs-acao="${cat}"]`)?.value||null;
+    const rec=state.draft.observacoes.find(o=>o.categoria===cat);
+    if(rec){ rec.observado=obsVal; rec.acao=acaoVal; }
+    else state.draft.observacoes.push({categoria:cat, observado:obsVal, acao:acaoVal});
+  });
+}
 function syncObsDetails(){
+  captureObsDetails(); // preserva os textos já digitados antes de re-renderizar
   const active=$$("#obsChips .chip.on").map(b=>b.dataset.obs).filter(c=>c!==OBS_EXCLUSIVA);
   const cont=$("#obsDetails");
   cont.innerHTML = active.map(cat=>{
