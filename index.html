@@ -12,6 +12,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
 <style>
 /* ===================== DESIGN TOKENS (clean, claro, alto contraste) ===================== */
@@ -791,9 +792,12 @@ async function iniciarVisita(talhao, existing=null){
   const oCpd     = existing ? (existing.obsCpd||"")  : "";
   const oHerb    = existing ? (existing.obsHerb||"") : "";
   const btnLabel = existing ? "💾 Salvar alterações" : "💾 Salvar visita";
+  // Navegação de retorno: admin editando volta aos Relatórios; consultor mantém o fluxo original.
+  const backTarget = existing ? (state._adminEditing ? "adminTab('reports')" : "viewHistoricoPick()") : "selFazenda(state.fazenda)";
+  const backLabel  = existing ? (state._adminEditing ? "Relatórios" : "Histórico") : "Talhões";
 
   w.innerHTML = `
-    <button class="btn ghost small" onclick="${existing?'viewHistoricoPick()':'selFazenda(state.fazenda)'}">← ${existing?'Histórico':'Talhões'}</button>
+    <button class="btn ghost small" onclick="${backTarget}">← ${backLabel}</button>
     <div class="card">
       <h2>${titulo}</h2>
       <div class="hint">${state.fazenda.display_nome} · ${talhao.nome} (${talhao.area_ha} ha)</div>
@@ -1230,6 +1234,8 @@ async function salvarVisita(){
 }
 
 function telaPosSalvar(vid, edited=false){
+  const adminEditing = !!state._adminEditing;
+  const concluirAction = adminEditing ? "adminReturnAfterEdit()" : "viewFazendas()";
   const w=$("#cwrap");
   w.innerHTML=`<div class="card center">
     <div style="font-size:2rem">✅</div>
@@ -1238,8 +1244,41 @@ function telaPosSalvar(vid, edited=false){
     <div class="spacer"></div>
     <button class="btn" onclick='exportarPDFVisita("${vid}")'>📄 Exportar PDF (selecionar seções)</button>
     <button class="btn secondary" onclick="exportarFotos()" style="margin-top:8px">🖼️ Exportar fotos</button>
-    <button class="btn ghost" onclick="viewFazendas()" style="margin-top:8px">Concluir</button>
+    <button class="btn ghost" onclick="${concluirAction}" style="margin-top:8px">Concluir</button>
   </div>`;
+}
+/* Retorno do admin ao dashboard após editar uma visita (recarrega dados atualizados) */
+function adminReturnAfterEdit(){ state._adminEditing=false; renderAdmin(); }
+/* ---------- ADMIN: excluir uma visita por completo (visita + blocos + fotos) ---------- */
+async function adminDeleteVisita(vid){
+  if(!(state.profile && state.profile.role==='admin')) return toast("Ação restrita ao administrador","err");
+  if(!confirm("Excluir DEFINITIVAMENTE esta visita e todos os seus dados (observações, nutrição, CPD, herbicidas, adesão, evidências e fotos)?\n\nEsta ação não pode ser desfeita.")) return;
+  await guard(async()=>{
+    // 1) remove as fotos do Storage (bucket privado), se houver
+    try{
+      const { data:list } = await sb.storage.from(STORAGE_BUCKET).list(String(vid),{limit:100});
+      if(list && list.length){ await sb.storage.from(STORAGE_BUCKET).remove(list.map(o=>`${vid}/${o.name}`)); }
+    }catch(e){ console.warn("Falha ao remover fotos do Storage:",e); }
+    // 2) apaga os blocos filhos
+    const del = await Promise.all([
+      sb.from("visita_observacoes").delete().eq("visita_id",vid),
+      sb.from("visita_nutricao").delete().eq("visita_id",vid),
+      sb.from("visita_cpd").delete().eq("visita_id",vid),
+      sb.from("visita_herb").delete().eq("visita_id",vid),
+      sb.from("visita_recomendacoes_check").delete().eq("visita_id",vid),
+      sb.from("evidencias_meta").delete().eq("visita_id",vid),
+    ]);
+    const derr = del.find(r=>r.error);
+    if(derr) return toast("Sem permissão para excluir (rode o SQL de admin): "+derr.error.message,"err");
+    // 3) apaga a visita (cabeçalho)
+    const { error } = await sb.from("visitas").delete().eq("id",vid);
+    if(error) return toast(error.message,"err");
+    toast("Visita excluída","ok");
+    // atualiza as fontes locais e a lista, sem recarregar tudo
+    if(A.data){ A.data.visRows=(A.data.visRows||[]).filter(x=>x.id!==vid);
+      A.data.vis=(A.data.vis||[]).filter(x=>x.id!==vid); }
+    if($("#reportList")) renderReportList();
+  });
 }
 
 /* =====================================================================
@@ -1284,10 +1323,17 @@ async function carregarVisitaCompleta(vid){
 /* ---------- EDITAR VISITA: carrega os dados e abre o formulário em modo edição ---------- */
 async function editarVisita(vid){
   await guard(async()=>{
-    const w=$("#cwrap"); w.innerHTML=`<div class="center" style="padding:24px"><span class="loader dark"></span> Carregando visita…</div>`;
+    const isAdmin = !!(state.profile && state.profile.role==='admin');
+    // No contexto do admin não existe #cwrap; cria uma área de edição dentro do dashboard.
+    let w=$("#cwrap");
+    if(!w){ const body=$("#adminBody"); if(body){ body.innerHTML=`<div id="cwrap"></div>`; w=$("#cwrap"); } }
+    if(!w) return toast("Não foi possível abrir o editor","err");
+    w.innerHTML=`<div class="center" style="padding:24px"><span class="loader dark"></span> Carregando visita…</div>`;
     const D=await carregarVisitaCompleta(vid); const v=D.v;
     if(!v) return toast("Visita não encontrada","err");
-    if(v.consultor_id!==state.user.id) return toast("Você só pode editar as suas visitas","err");
+    if(v.consultor_id!==state.user.id && !isAdmin) return toast("Você só pode editar as suas visitas","err");
+    // Marca o modo de edição do admin (controla navegação de retorno e telas pós-salvar).
+    state._adminEditing = isAdmin;
 
     // contexto (fazenda/talhão) e tipo de adubação
     state.fazenda = v.fazendas;
@@ -1477,7 +1523,7 @@ function nomeBaseVisita(v){
 }
 function nomeArquivoPDF(v){ return nomeBaseVisita(v)+".pdf"; }
 
-async function gerarPDF(D,pick,fotos=[]){
+async function gerarPDF(D,pick,fotos=[],opts={}){
   const { jsPDF }=window.jspdf; const doc=new jsPDF({unit:"pt",format:"a4"});
   const v=D.v; const W=doc.internal.pageSize.getWidth(); let y=48;
   // header (azul-escuro) com logos
@@ -1622,6 +1668,8 @@ async function gerarPDF(D,pick,fotos=[]){
 
   doc.setFontSize(7); doc.setTextColor(150);
   doc.text("Gerado pelo Projeto Suporte Técnico",40,doc.internal.pageSize.getHeight()-24);
+  // Modo compactação: devolve o PDF como blob (não baixa nem exibe toast individual).
+  if(opts && opts.returnBlob){ return { blob: doc.output("blob"), filename: nomeArquivoPDF(v) }; }
   doc.save(nomeArquivoPDF(v));
   toast("PDF gerado"+((pick.fotos&&fotos&&fotos.length)?` com ${fotos.length} foto(s)`:""),"ok");
 }
@@ -2122,7 +2170,7 @@ function renderReports(){
     <div class="row">
       <button class="btn small" onclick="renderReportList()">Aplicar filtros</button>
       <button class="btn small secondary" onclick="clearReportFilters()">Limpar</button>
-      <button class="btn small secondary" onclick="batchExport('pdf')">⬇️ PDF (selecionadas)</button>
+      <button class="btn small secondary" onclick="batchExport('pdf')">⬇️ PDF ZIP (selecionadas)</button>
       <button class="btn small secondary" onclick="batchExport('xlsx')">⬇️ XLSX (selecionadas)</button>
     </div></div>
     <div id="reportList"></div>`;
@@ -2170,8 +2218,10 @@ function renderReportList(){
           <td>${(v.versao>1)?`<span class="badge warn" title="Editado em ${fmtDate(v.editado_em)}">v${v.versao}</span>`:`<span class="hint">v1</span>`}</td>
           <td style="white-space:nowrap">
             <button class="btn small secondary" onclick="adminVerVisita('${v.id}')">Ver</button>
+            <button class="btn small secondary" onclick="editarVisita('${v.id}')">Editar</button>
             <button class="btn small secondary" onclick="exportVisitaPDF('${v.id}')">PDF</button>
             <button class="btn small secondary" onclick="exportVisitaXLSX('${v.id}')">XLSX</button>
+            <button class="btn small danger" onclick="adminDeleteVisita('${v.id}')">Excluir</button>
           </td>
         </tr>`).join("")}</tbody>
     </table></div>`;
@@ -2182,12 +2232,37 @@ async function batchExport(kind){
   const vids=selectedReportVids();
   if(!vids.length) return toast("Selecione ao menos uma visita na lista","err");
   if(kind==="xlsx"){ await exportVisitasXLSXConsolidado(vids); return; }
-  // PDF permanece um arquivo por visita (a nomenclatura por relatório é obrigatória)
-  toast(`Gerando ${vids.length} PDF(s)…`,"ok");
-  for(const vid of vids){
-    await exportVisitaPDF(vid);
-    await new Promise(r=>setTimeout(r,350)); // evita bloqueio de múltiplos downloads
+  await batchExportPDFZip(vids);
+}
+/* PDF em lote → um ÚNICO arquivo .zip contendo todos os relatórios (nomenclatura mantida).
+   Cada PDF preserva o nome padrão AAMM_CONSULTOR_RV_PRODUTOR_FAZENDA.pdf. */
+async function batchExportPDFZip(vids){
+  if(typeof JSZip==="undefined"){ // fallback: compactador indisponível → baixa individualmente
+    toast("Compactador indisponível; baixando PDFs individualmente…","err");
+    for(const vid of vids){ await exportVisitaPDF(vid); await new Promise(r=>setTimeout(r,350)); }
+    return;
   }
+  toast(`Gerando ${vids.length} PDF(s) e compactando em ZIP…`,"ok");
+  const zip=new JSZip(); const used={};
+  for(const vid of vids){
+    try{
+      const res=await exportVisitaPDF(vid,{returnBlob:true});
+      if(res && res.blob){
+        let name=res.filename||`relatorio_${vid}.pdf`;
+        // evita colisão de nomes idênticos no mesmo ZIP
+        if(used[name]){ used[name]++; name=name.replace(/\.pdf$/i,`_${used[name]}.pdf`); } else used[name]=1;
+        zip.file(name, res.blob);
+      }
+    }catch(e){ console.warn("Falha ao gerar PDF para ZIP:",vid,e); }
+  }
+  const content=await zip.generateAsync({type:"blob"});
+  const dt=new Date(); const aamm=String(dt.getFullYear()).slice(2)+String(dt.getMonth()+1).padStart(2,"0");
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(content);
+  a.download=`${aamm}_Relatorios_PDF_${vids.length}visitas.zip`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+  toast(`ZIP gerado com ${vids.length} relatório(s) em PDF`,"ok");
 }
 /* XLSX CONSOLIDADO — um único arquivo com TODAS as visitas selecionadas.
    Abas estruturadas (Power Query/BI), cada linha rastreável pelo relatório. */
@@ -2231,13 +2306,13 @@ async function exportVisitasXLSXConsolidado(vids){
   toast(`Excel consolidado gerado (${vids.length} visita(s))`,"ok");
 }
 /* PDF de UMA visita (admin) — todas as seções, sem fotos em memória */
-async function exportVisitaPDF(vid){
+async function exportVisitaPDF(vid, opts={}){
   const D=await carregarVisitaCompleta(vid);
   const fotos=(D.evi||[]).filter(e=>e.storage_path).map(e=>({storage_path:e.storage_path,
     capturado_em:e.capturado_em, lat:(e.latitude!=null?Number(e.latitude):null),
     lon:(e.longitude!=null?Number(e.longitude):null)}));
   const pick={cab:true,obs:true,nut:true,cpd:true,herb:true,chk:true,evi:true,fotos:fotos.length>0};
-  await gerarPDF(D,pick,fotos);
+  return await gerarPDF(D,pick,fotos,opts);
 }
 /* XLSX de UMA visita (admin) — abas estruturadas p/ Power Query/BI */
 async function exportVisitaXLSX(vid){
@@ -2304,6 +2379,10 @@ async function adminVerVisita(vid){
     <div class="row">
       <button class="btn" onclick="exportVisitaPDF('${vid}')">📄 Baixar PDF</button>
       <button class="btn secondary" onclick="exportVisitaXLSX('${vid}')">⬇️ Baixar XLSX</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button class="btn secondary" onclick="this.closest('div[style]').parentNode.remove(); editarVisita('${vid}')">✏️ Editar</button>
+      <button class="btn danger" onclick="this.closest('div[style]').parentNode.remove(); adminDeleteVisita('${vid}')">🗑 Excluir</button>
     </div>
   </div>`;
   document.body.appendChild(modal);
