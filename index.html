@@ -2216,12 +2216,14 @@ function renderReportList(){
           <td>${v.consultores?.nome||"—"}</td>
           <td>${adubLabel(v.tipo_adub)}</td>
           <td>${(v.versao>1)?`<span class="badge warn" title="Editado em ${fmtDate(v.editado_em)}">v${v.versao}</span>`:`<span class="hint">v1</span>`}</td>
-          <td style="white-space:nowrap">
-            <button class="btn small secondary" onclick="adminVerVisita('${v.id}')">Ver</button>
-            <button class="btn small secondary" onclick="editarVisita('${v.id}')">Editar</button>
-            <button class="btn small secondary" onclick="exportVisitaPDF('${v.id}')">PDF</button>
-            <button class="btn small secondary" onclick="exportVisitaXLSX('${v.id}')">XLSX</button>
-            <button class="btn small danger" onclick="adminDeleteVisita('${v.id}')">Excluir</button>
+          <td style="min-width:180px">
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+              <button class="btn small secondary" onclick="adminVerVisita('${v.id}')">Ver</button>
+              <button class="btn small secondary" onclick="editarVisita('${v.id}')">Editar</button>
+              <button class="btn small secondary" onclick="exportVisitaPDF('${v.id}')">PDF</button>
+              <button class="btn small secondary" onclick="exportVisitaXLSX('${v.id}')">XLSX</button>
+              <button class="btn small danger" onclick="adminDeleteVisita('${v.id}')">Excluir</button>
+            </div>
           </td>
         </tr>`).join("")}</tbody>
     </table></div>`;
